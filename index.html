@@ -8,21 +8,9 @@
   </head>
   <body>
     <main class="terminal" id="terminal">
-      <div class="terminal__header">
-        <div class="terminal__traffic" aria-hidden="true">
-          <span class="traffic-light traffic-light--close"></span>
-          <span class="traffic-light traffic-light--minimize"></span>
-          <span class="traffic-light traffic-light--zoom"></span>
-        </div>
-        <div class="terminal__title">
-          <span class="terminal__icon" aria-hidden="true"></span>
-          <span id="terminal-title-text">Terminal — zsh — 80x24</span>
-        </div>
-        <div class="terminal__spacer" aria-hidden="true"></div>
-      </div>
       <div class="terminal__output" id="output" aria-live="polite"></div>
       <div class="terminal__input-line" id="input-line">
-        <span class="terminal__prompt" id="prompt">nikki@Nikkis-MacBook-Pro ~ %</span>
+        <span class="terminal__prompt" id="prompt">guest@terminal ~ %</span>
         <div class="terminal__input-wrap">
           <input
             class="terminal__input"
@@ -41,6 +29,6 @@
       <button class="terminal__jump" id="jump-to-bottom" type="button">Jump to bottom</button>
       <span class="terminal__size-measure" id="terminal-size-measure" aria-hidden="true">MMMMMMMMMM</span>
     </main>
-    <script src="app.js"></script>
+    <script type="module" src="app.js"></script>
   </body>
 </html>

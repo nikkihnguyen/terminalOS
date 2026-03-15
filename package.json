@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "geist": "^1.7.0",
+    "unicode-animations": "^1.0.3"
+  }
+}

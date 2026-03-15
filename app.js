@@ -1,7 +1,8 @@
+import spinnerLibrary from "./node_modules/unicode-animations/dist/index.js";
+
 const outputEl = document.getElementById("output");
 const inputEl = document.getElementById("command-input");
 const promptEl = document.getElementById("prompt");
-const titleTextEl = document.getElementById("terminal-title-text");
 const jumpButton = document.getElementById("jump-to-bottom");
 const sizeMeasureEl = document.getElementById("terminal-size-measure");
 const terminalEl = document.getElementById("terminal");
@@ -24,10 +25,10 @@ const settings = {
 };
 
 const shellState = {
-  user: "nikki",
-  host: "Nikkis-MacBook-Pro",
-  home: "/Users/nikki",
-  cwd: "/Users/nikki",
+  user: "guest",
+  host: "terminal",
+  home: "/Users/guest",
+  cwd: "/Users/guest",
 };
 
 let mode = "shell"; // shell | flow | ai
@@ -41,6 +42,7 @@ let currentFlow = null;
 let flowState = null;
 let isRunning = false;
 let pendingTimers = new Set();
+let activeSpinner = null;
 let tabState = { value: "", timestamp: 0 };
 let isUserAtBottom = true;
 let sessionStats = {
@@ -167,7 +169,7 @@ function createFileSystem() {
       Users: {
         type: "dir",
         entries: {
-          nikki: {
+          guest: {
             type: "dir",
             entries: {
               Desktop: {
@@ -251,6 +253,18 @@ function createFileSystem() {
 }
 
 const themeOptions = ["default", "amber", "ice"];
+const spinnerNames = Object.keys(spinnerLibrary).filter((name) => {
+  const spinner = spinnerLibrary[name];
+  return spinner && Array.isArray(spinner.frames) && spinner.frames.length > 0;
+});
+const thinkingSpinner =
+  spinnerLibrary[
+    spinnerNames[Math.floor(Math.random() * spinnerNames.length)] || "braille"
+  ] ||
+  spinnerLibrary.braille ||
+  spinnerLibrary.helix;
+const DEFAULT_COMMAND_DELAY = 520;
+const DEFAULT_STEP_DELAY = 45;
 
 const baseCommands = [
   {
@@ -307,6 +321,7 @@ const baseCommands = [
     usage: "ls [path]",
     runDelay: 80,
     stepDelay: 20,
+    thinkingLabel: "Working...",
     handler: (args) => {
       const target = args[0] || ".";
       const resolved = resolvePath(target);
@@ -348,6 +363,7 @@ const baseCommands = [
     usage: "cat <file>",
     runDelay: 120,
     stepDelay: 20,
+    thinkingLabel: "Working...",
     handler: (args) => {
       const target = args[0];
       if (!target) {
@@ -374,6 +390,7 @@ const baseCommands = [
     usage: "open <file|url|app>",
     runDelay: 150,
     stepDelay: 20,
+    thinkingLabel: "Working...",
     handler: (args) => {
       if (!args.length) {
         return [printLine("open: missing operand", "error")];
@@ -443,6 +460,7 @@ const baseCommands = [
     usage: "portfolio",
     runDelay: 80,
     stepDelay: 25,
+    thinkingLabel: "Working...",
     handler: () => {
       const events = [printLine("Projects:", "success")];
       projectData.forEach((project) => {
@@ -461,6 +479,7 @@ const baseCommands = [
     usage: "apps",
     runDelay: 80,
     stepDelay: 25,
+    thinkingLabel: "Working...",
     handler: () => {
       const events = [printLine("Apps:", "success")];
       appsData.forEach((app) => {
@@ -811,6 +830,40 @@ function appendPanel(title, content) {
   addOutputNode(container);
 }
 
+function startThinkingIndicator(label = "Thinking...") {
+  stopThinkingIndicator();
+  if (!thinkingSpinner?.frames?.length) return;
+
+  const line = document.createElement("div");
+  line.className = "output-line output-line--spinner";
+
+  const frame = document.createElement("span");
+  frame.className = "spinner-frame";
+  frame.textContent = thinkingSpinner.frames[0];
+  line.appendChild(frame);
+
+  const text = document.createElement("span");
+  text.textContent = label;
+  line.appendChild(text);
+
+  addOutputNode(line);
+
+  let index = 1;
+  const timerId = window.setInterval(() => {
+    frame.textContent = thinkingSpinner.frames[index % thinkingSpinner.frames.length];
+    index += 1;
+  }, thinkingSpinner.interval || 80);
+
+  activeSpinner = { line, timerId };
+}
+
+function stopThinkingIndicator() {
+  if (!activeSpinner) return;
+  window.clearInterval(activeSpinner.timerId);
+  activeSpinner.line.remove();
+  activeSpinner = null;
+}
+
 function scrollToBottom() {
   outputEl.scrollTop = outputEl.scrollHeight;
   isUserAtBottom = true;
@@ -897,6 +950,7 @@ function setRunning(next) {
   isRunning = next;
   inputEl.disabled = next;
   if (!next) {
+    inputEl.focus({ preventScroll: true });
     updateCaret();
   }
 }
@@ -904,6 +958,7 @@ function setRunning(next) {
 function clearPendingTimers() {
   pendingTimers.forEach((timerId) => clearTimeout(timerId));
   pendingTimers.clear();
+  stopThinkingIndicator();
 }
 
 function scheduleEvent(callback, delay) {
@@ -915,21 +970,26 @@ function scheduleEvent(callback, delay) {
 }
 
 function queueEvents(events, options = {}) {
-  if (!events || events.length === 0) {
-    setRunning(false);
-    saveOutput();
-    return;
-  }
+  const queuedEvents = Array.isArray(events) ? events : [];
   const initialDelay =
     typeof options.initialDelay === "number" ? options.initialDelay : 0;
-  const stepDelay = typeof options.stepDelay === "number" ? options.stepDelay : 30;
+  const stepDelay =
+    typeof options.stepDelay === "number" ? options.stepDelay : DEFAULT_STEP_DELAY;
+  const thinkingLabel = options.thinkingLabel || "Thinking...";
   setRunning(true);
+  startThinkingIndicator(thinkingLabel);
   let totalDelay = initialDelay;
-  events.forEach((event) => {
-    scheduleEvent(() => renderEvent(event), totalDelay);
+  queuedEvents.forEach((event, index) => {
+    scheduleEvent(() => {
+      if (index === 0) {
+        stopThinkingIndicator();
+      }
+      renderEvent(event);
+    }, totalDelay);
     totalDelay += stepDelay;
   });
   scheduleEvent(() => {
+    stopThinkingIndicator();
     setRunning(false);
     saveOutput();
   }, totalDelay);
@@ -953,20 +1013,22 @@ function runCommand(input) {
   const { command, args } = parseInput(trimmed);
   const entry = commandRegistry.get(command);
   if (!entry) {
-    appendLine(`zsh: command not found: ${command}`, "error");
-    saveOutput();
+    queueEvents([printLine(`zsh: command not found: ${command}`, "error")], {
+      initialDelay: DEFAULT_COMMAND_DELAY,
+      stepDelay: 0,
+      thinkingLabel: "Thinking...",
+    });
     return;
   }
 
   const events = entry.handler(args) || [];
-  const runDelay = entry.runDelay || 0;
+  const runDelay = Math.max(entry.runDelay || 0, DEFAULT_COMMAND_DELAY);
   const stepDelay = entry.stepDelay || 0;
-  if (runDelay || stepDelay) {
-    queueEvents(events, { initialDelay: runDelay, stepDelay });
-    return;
-  }
-  events.forEach(renderEvent);
-  saveOutput();
+  queueEvents(events, {
+    initialDelay: runDelay,
+    stepDelay,
+    thinkingLabel: entry.thinkingLabel,
+  });
 }
 
 function renderEvent(event) {
@@ -1191,8 +1253,11 @@ function handleAIInput(input) {
 
   appendLine(`You: ${trimmed}`);
   const reply = generateAIReply(trimmed);
-  appendLine(`AI: ${reply}`, "success");
-  saveOutput();
+  queueEvents([printLine(`AI: ${reply}`, "success")], {
+    initialDelay: 1200,
+    stepDelay: 0,
+    thinkingLabel: "Thinking...",
+  });
 }
 
 function generateAIReply(input) {
@@ -1220,6 +1285,14 @@ function safeStorageGet(key) {
 function safeStorageSet(key, value) {
   try {
     localStorage.setItem(key, value);
+  } catch (error) {
+    // Ignore storage failures (private mode, quota exceeded, etc.)
+  }
+}
+
+function safeStorageRemove(key) {
+  try {
+    localStorage.removeItem(key);
   } catch (error) {
     // Ignore storage failures (private mode, quota exceeded, etc.)
   }
@@ -1273,7 +1346,7 @@ function updatePrompt() {
 }
 
 function updateTitle() {
-  if (!titleTextEl || !sizeMeasureEl) return;
+  if (!sizeMeasureEl) return;
   const testWidth = sizeMeasureEl.getBoundingClientRect().width || 1;
   const charWidth = testWidth / 10;
   const lineHeight =
@@ -1281,7 +1354,7 @@ function updateTitle() {
     parseFloat(getComputedStyle(outputEl).fontSize) * 1.55;
   const cols = Math.max(40, Math.floor(outputEl.clientWidth / charWidth));
   const rows = Math.max(10, Math.floor(outputEl.clientHeight / lineHeight));
-  titleTextEl.textContent = `Terminal — zsh — ${cols}x${rows}`;
+  document.title = `Terminal — zsh — ${cols}x${rows}`;
 }
 
 function saveOutput() {
@@ -1290,40 +1363,27 @@ function saveOutput() {
   } else {
     shellOutputHTML = outputEl.innerHTML;
   }
-  safeStorageSet(STORAGE_KEYS.shellOutput, shellOutputHTML);
-  safeStorageSet(STORAGE_KEYS.aiOutput, aiOutputHTML);
-  safeStorageSet(
-    STORAGE_KEYS.shellHistory,
-    JSON.stringify(shellHistory.slice(-settings.maxHistory))
-  );
-  safeStorageSet(
-    STORAGE_KEYS.aiHistory,
-    JSON.stringify(aiHistory.slice(-settings.maxHistory))
-  );
+}
+
+function clearPersistedHistory() {
+  safeStorageRemove(STORAGE_KEYS.shellOutput);
+  safeStorageRemove(STORAGE_KEYS.aiOutput);
+  safeStorageRemove(STORAGE_KEYS.shellHistory);
+  safeStorageRemove(STORAGE_KEYS.aiHistory);
 }
 
 function loadState() {
-  const storedShellOutput = safeStorageGet(STORAGE_KEYS.shellOutput);
-  const storedAIOutput = safeStorageGet(STORAGE_KEYS.aiOutput);
-  const storedShellHistory = safeStorageGet(STORAGE_KEYS.shellHistory);
-  const storedAIHistory = safeStorageGet(STORAGE_KEYS.aiHistory);
   const storedTheme = safeStorageGet(STORAGE_KEYS.theme);
 
-  if (storedShellOutput) {
-    shellOutputHTML = storedShellOutput;
-    outputEl.innerHTML = shellOutputHTML;
-  }
-  if (storedAIOutput) {
-    aiOutputHTML = storedAIOutput;
-  }
-  if (storedShellHistory) {
-    shellHistory = JSON.parse(storedShellHistory);
-    shellHistoryIndex = shellHistory.length;
-  }
-  if (storedAIHistory) {
-    aiHistory = JSON.parse(storedAIHistory);
-    aiHistoryIndex = aiHistory.length;
-  }
+  clearPersistedHistory();
+  shellOutputHTML = "";
+  aiOutputHTML = "";
+  shellHistory = [];
+  shellHistoryIndex = 0;
+  aiHistory = [];
+  aiHistoryIndex = 0;
+  outputEl.innerHTML = "";
+
   if (storedTheme) {
     applyTheme(storedTheme);
   }
@@ -1331,7 +1391,17 @@ function loadState() {
 }
 
 function printWelcome() {
-  appendLine("Last login: Tue Jan 27 11:03:55 on ttys000");
+  const now = new Date();
+  const formatted = now.toLocaleString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+  appendLine(`Last login: ${formatted.replace(",", "")} on ttys000`);
   appendLine("Type 'help' to see available commands.");
 }
 
@@ -1420,7 +1490,6 @@ inputEl.addEventListener("keydown", (event) => {
       }
       appendCommandEcho(value);
       handleAIInput(value);
-      saveOutput();
       return;
     }
   }
