@@ -1,4 +1,5 @@
 import spinnerLibrary from "./node_modules/unicode-animations/dist/index.js";
+import { rawProjectData } from "./projectData.js";
 
 const outputEl = document.getElementById("output");
 const inputEl = document.getElementById("command-input");
@@ -57,32 +58,23 @@ let sessionStats = {
   sessionDurationMs: 0,
 };
 
-const projectData = [
-  {
-    slug: "computer-vision",
-    name: "Computer Vision",
-    summary: "Experimental computer vision project featured in the desktop OS portfolio.",
-    tech: "Computer vision, browser experiment",
-    highlights: ["Interactive demo", "Visual exploration", "Personal experiment"],
-    url: "https://nikkihnguyen.com/computer-vision",
-  },
-  {
-    slug: "shader-toy",
-    name: "Shader Toy",
-    summary: "Shader-based visual playground linked from the desktop OS portfolio.",
-    tech: "Shaders, graphics, browser experiment",
-    highlights: ["Realtime visuals", "Creative coding", "Graphics exploration"],
-    url: "https://nikkihnguyen.com/shader-toy/dist",
-  },
-  {
-    slug: "trading-dashboard",
-    name: "Trading Dashboard",
-    summary: "Market-focused dashboard prototype linked from the desktop OS portfolio.",
-    tech: "Dashboard UI, finance tooling, browser app",
-    highlights: ["Trading view", "Data-rich layout", "Experimental product work"],
-    url: "https://nikkihnguyen.com/trader-dashboard",
-  },
-];
+const projectUrlMap = {
+  "98portfolio": "https://nikkihnguyen.com/os/",
+  computervision: "https://nikkihnguyen.com/computer-vision",
+  terminalos: "https://nikkihnguyen.com/os/",
+};
+
+const projectData = rawProjectData.map((project) => {
+  const slug = project.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return {
+    ...project,
+    slug,
+    name: project.title,
+    tech: project.stack.join(", "),
+    highlights: [project.intent, project.build, project.unique],
+    url: projectUrlMap[slug] || "",
+  };
+});
 
 const bookmarksData = [
   {
@@ -495,7 +487,7 @@ const baseCommands = [
       printLine("Hi there - I'm Nikki, a product manager based in NYC."),
       printLine("Currently Product Manager at EliseAI. Previously at Spline, Clearing Health, Better.com, Dropbox, and Atlassian."),
       printLine("I'm interested in product, storytelling, creative tech, and small AI-powered experiments."),
-      printLine("Try: portfolio, bookmarks, contact, ai", "success"),
+      printLine("Try: portfolio, bookmarks, os, contact, ai", "success"),
       printLine("Tip: press Tab to autocomplete commands.", "success"),
     ],
   },
@@ -534,6 +526,18 @@ const baseCommands = [
       events.push(printLine("Use: launch <bookmark> or open <url>", "success"));
       return events;
     },
+  },
+  {
+    name: "os",
+    aliases: [],
+    description: "Queue Nikki's desktop OS project for opening.",
+    usage: "os",
+    handler: () =>
+      queueOpenTarget("Terminal OS", "https://nikkihnguyen.com/os/", [
+        printLine("Terminal OS", "success"),
+        printLine("Nikki's desktop-style personal OS experiment."),
+        printLine("Open: https://nikkihnguyen.com/os/"),
+      ]),
   },
   {
     name: "launch",
@@ -798,13 +802,27 @@ function describeBookmark(bookmark) {
 }
 
 function describeProject(project) {
-  return queueOpenTarget(project.name, project.url, [
+  const events = [
     printLine(`Project: ${project.name}`, "success"),
     printLine(project.summary),
-    printLine(`Tech: ${project.tech}`),
-    printLine(`Highlights: ${project.highlights.join(", ")}`),
-    printLine(`Open: ${project.url}`),
-  ]);
+    printLine(`Date: ${project.date}`),
+    printLine(`Platform: ${project.platform}`),
+    printLine(`Stack: ${project.tech}`),
+    printLine(`Intent: ${project.intent}`),
+    printLine(`Build: ${project.build}`),
+    printLine(`Why it stands out: ${project.unique}`),
+  ];
+
+  if (project.url) {
+    return queueOpenTarget(project.name, project.url, [
+      ...events,
+      printLine(`Open: ${project.url}`),
+    ]);
+  }
+
+  pendingOpenTarget = null;
+  events.push(printLine("No public link yet.", "success"));
+  return events;
 }
 
 function buildCommandHelp(commandName) {
