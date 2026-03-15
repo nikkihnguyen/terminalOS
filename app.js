@@ -170,7 +170,7 @@ const contactLinks = [
 
 const projectFilterOptions = ["featured", "recent", "web", "ios", "all"];
 const bookmarkFilterOptions = ["featured", "ai", "build", "work"];
-const themeOptions = ["default", "amber", "ice"];
+const themeOptions = ["default", "amber", "ice", "rose", "matrix"];
 const featuredProjectSlugs = [
   "terminalos",
   "98portfolio",
@@ -383,7 +383,7 @@ const flows = {
     steps: {
       theme: {
         id: "theme",
-        prompt: "Theme. Use arrows or type. (default/amber/ice)",
+        prompt: "Theme. Use arrows or type. (default/amber/ice/rose/matrix)",
         type: "choice",
         choices: [
           ...themeOptions.map((value) => ({ label: value, value })),
@@ -2770,7 +2770,11 @@ function loadStats() {
 }
 
 function applyTheme(themeName) {
-  terminalEl.classList.remove("theme-amber", "theme-ice");
+  terminalEl.classList.remove(
+    ...themeOptions
+      .filter((name) => name !== "default")
+      .map((name) => `theme-${name}`)
+  );
   if (themeName !== "default") {
     terminalEl.classList.add(`theme-${themeName}`);
   }
