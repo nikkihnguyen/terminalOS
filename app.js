@@ -12,6 +12,7 @@ const measureEl = document.getElementById("terminal-measure");
 const inputWrapEl = document.querySelector(".terminal__input-wrap");
 const ghostEl = document.getElementById("terminal-ghost");
 const helperEl = document.getElementById("terminal-helper");
+const flowEl = document.getElementById("terminal-flow");
 
 const STORAGE_KEYS = {
   shellOutput: "terminalos.shell.output",
@@ -43,6 +44,7 @@ let shellOutputHTML = "";
 let aiOutputHTML = "";
 let currentFlow = null;
 let flowState = null;
+let activeFlowStepNode = null;
 let isRunning = false;
 let pendingTimers = new Set();
 let activeSpinner = null;
@@ -115,7 +117,281 @@ const bookmarksData = [
   },
 ];
 
+const contactLinks = [
+  {
+    slug: "email",
+    name: "Email",
+    description: "Nikki's direct email address.",
+    url: "mailto:nikki.nguyen8@gmail.com",
+  },
+  {
+    slug: "linkedin",
+    name: "LinkedIn",
+    description: "Nikki's LinkedIn profile.",
+    url: "https://linkedin.com/in/nikkinguyen8/",
+  },
+  {
+    slug: "github",
+    name: "GitHub",
+    description: "Nikki's GitHub profile.",
+    url: "https://github.com/nikkihnguyen",
+  },
+  {
+    slug: "twitter",
+    name: "Twitter",
+    description: "Nikki's Twitter profile.",
+    url: "https://twitter.com/nikkihnguyen",
+  },
+  {
+    slug: "instagram",
+    name: "Instagram",
+    description: "Nikki's Instagram profile.",
+    url: "https://instagram.com/nikkihnguyen/",
+  },
+  {
+    slug: "website",
+    name: "Website",
+    description: "Nikki's main website.",
+    url: "https://nikkihnguyen.com/",
+  },
+  {
+    slug: "os",
+    name: "Terminal OS",
+    description: "Nikki's desktop-style personal OS experiment.",
+    url: "https://nikkihnguyen.com/os/",
+  },
+];
+
+const projectFilterOptions = ["featured", "recent", "web", "ios", "all"];
+const bookmarkFilterOptions = ["featured", "ai", "build", "work"];
+const themeOptions = ["default", "amber", "ice"];
+const featuredProjectSlugs = [
+  "terminalos",
+  "98portfolio",
+  "computervision",
+  "cameraascii",
+  "tasktracker",
+  "hotdogorlegs",
+];
+const featuredBookmarkSlugs = ["terminal-os", "spline", "cursor", "claude"];
+const FLOW_BACK_VALUE = "back";
+const FLOW_EXIT_VALUE = "exit";
+
 const flows = {
+  "help-picker": {
+    id: "help-picker",
+    name: "Help Browser",
+    startStepId: "command",
+    steps: {
+      command: {
+        id: "command",
+        prompt: "Help topic. Use arrows or type.",
+        type: "choice",
+        choices: () => [
+          ...getUniqueCommandNames().map((value) => ({ label: value, value })),
+          { label: "exit", value: FLOW_EXIT_VALUE },
+        ],
+        next: (input) => (input === FLOW_EXIT_VALUE ? "exit" : "show"),
+      },
+      show: {
+        id: "show",
+        events: (answers) => buildCommandHelp(answers.command),
+        autoExit: true,
+      },
+    },
+  },
+  "portfolio-picker": {
+    id: "portfolio-picker",
+    name: "Portfolio Filter",
+    startStepId: "filter",
+    steps: {
+      filter: {
+        id: "filter",
+        prompt: "Portfolio view. Use arrows or type. (featured/recent/web/ios/all)",
+        type: "choice",
+        choices: [
+          ...projectFilterOptions.map((value) => ({ label: value, value })),
+          { label: "exit", value: FLOW_EXIT_VALUE },
+        ],
+        next: (input) => (input === FLOW_EXIT_VALUE ? "exit" : "project"),
+      },
+      project: {
+        id: "project",
+        prompt: (answers) => `Projects (${answers.filter || "featured"}). Use arrows or type.`,
+        type: "choice",
+        choices: (answers) => [
+          ...getProjectList(answers.filter || "featured").map((project) => ({
+            label: project.name,
+            value: project.slug,
+          })),
+          { label: "↩ back", value: FLOW_BACK_VALUE },
+          { label: "exit", value: FLOW_EXIT_VALUE },
+        ],
+        next: (input) => {
+          if (input === FLOW_BACK_VALUE) return "filter";
+          if (input === FLOW_EXIT_VALUE) return "exit";
+          return "show";
+        },
+      },
+      show: {
+        id: "show",
+        events: (answers) => previewTarget(answers.project),
+        autoExit: true,
+      },
+    },
+  },
+  "bookmarks-picker": {
+    id: "bookmarks-picker",
+    name: "Bookmarks Filter",
+    startStepId: "filter",
+    steps: {
+      filter: {
+        id: "filter",
+        prompt: "Bookmarks view. Use arrows or type. (featured/ai/build/work)",
+        type: "choice",
+        choices: [
+          ...bookmarkFilterOptions.map((value) => ({ label: value, value })),
+          { label: "exit", value: FLOW_EXIT_VALUE },
+        ],
+        next: (input) => (input === FLOW_EXIT_VALUE ? "exit" : "bookmark"),
+      },
+      bookmark: {
+        id: "bookmark",
+        prompt: (answers) => `Bookmarks (${answers.filter || "featured"}). Use arrows or type.`,
+        type: "choice",
+        choices: (answers) => [
+          ...getBookmarkList(answers.filter || "featured").map((bookmark) => ({
+            label: bookmark.name,
+            value: bookmark.slug,
+          })),
+          { label: "↩ back", value: FLOW_BACK_VALUE },
+          { label: "exit", value: FLOW_EXIT_VALUE },
+        ],
+        next: (input) => {
+          if (input === FLOW_BACK_VALUE) return "filter";
+          if (input === FLOW_EXIT_VALUE) return "exit";
+          return "show";
+        },
+      },
+      show: {
+        id: "show",
+        events: (answers) => previewTarget(answers.bookmark),
+        autoExit: true,
+      },
+    },
+  },
+  "contact-browser": {
+    id: "contact-browser",
+    name: "Contact Browser",
+    startStepId: "link",
+    steps: {
+      link: {
+        id: "link",
+        prompt: "Contact. Use arrows or type.",
+        type: "choice",
+        choices: [
+          ...contactLinks.map((item) => ({ label: item.name, value: item.slug })),
+          { label: "exit", value: FLOW_EXIT_VALUE },
+        ],
+        next: (input) => (input === FLOW_EXIT_VALUE ? "exit" : "show"),
+      },
+      show: {
+        id: "show",
+        events: (answers) => previewTarget(answers.link),
+        autoExit: true,
+      },
+    },
+  },
+  "os-browser": {
+    id: "os-browser",
+    name: "OS Browser",
+    startStepId: "action",
+    steps: {
+      action: {
+        id: "action",
+        prompt: "OS. Use arrows or type.",
+        type: "choice",
+        choices: [
+          { label: "preview", value: "preview" },
+          { label: "open", value: "open" },
+          { label: "exit", value: FLOW_EXIT_VALUE },
+        ],
+        next: (input) => (input === FLOW_EXIT_VALUE ? "exit" : "show"),
+      },
+      show: {
+        id: "show",
+        events: (answers) =>
+          answers.action === "open" ? openTargetDirectly("os") : previewTarget("os"),
+        autoExit: true,
+      },
+    },
+  },
+  "about-browser": {
+    id: "about-browser",
+    name: "About Browser",
+    startStepId: "section",
+    steps: {
+      section: {
+        id: "section",
+        prompt: "About. Use arrows or type.",
+        type: "choice",
+        choices: [
+          { label: "bio", value: "bio" },
+          { label: "current", value: "current" },
+          { label: "interests", value: "interests" },
+          { label: "contact", value: "contact" },
+          { label: "os", value: "os" },
+          { label: "exit", value: FLOW_EXIT_VALUE },
+        ],
+        next: (input) => {
+          if (input === FLOW_EXIT_VALUE) return "exit";
+          if (input === "contact") return "contact";
+          if (input === "os") return "os";
+          return "show";
+        },
+      },
+      show: {
+        id: "show",
+        events: (answers) => buildAboutSectionEvents(answers.section),
+        autoExit: true,
+      },
+      contact: {
+        id: "contact",
+        events: () => [enterFlow("contact-browser")],
+        autoExit: true,
+      },
+      os: {
+        id: "os",
+        events: () => [enterFlow("os-browser")],
+        autoExit: true,
+      },
+    },
+  },
+  "theme-picker": {
+    id: "theme-picker",
+    name: "Theme Picker",
+    startStepId: "theme",
+    steps: {
+      theme: {
+        id: "theme",
+        prompt: "Theme. Use arrows or type. (default/amber/ice)",
+        type: "choice",
+        choices: [
+          ...themeOptions.map((value) => ({ label: value, value })),
+          { label: "exit", value: FLOW_EXIT_VALUE },
+        ],
+        next: (input) => (input === FLOW_EXIT_VALUE ? "exit" : "apply"),
+      },
+      apply: {
+        id: "apply",
+        events: (answers) => {
+          applyTheme(answers.theme || "default");
+          return [printLine(`Theme: ${answers.theme || "default"}`, "success")];
+        },
+        autoExit: true,
+      },
+    },
+  },
   tour: {
     id: "tour",
     name: "Guided Tour",
@@ -164,7 +440,7 @@ const flows = {
       },
       "show-bookmarks": {
         id: "show-bookmarks",
-        prompt: "Type 'bookmarks' to see saved links, then 'launch <bookmark>'. Want to open them now? (yes/no)",
+        prompt: "Type 'bookmarks' to browse saved links. Want to open them now? (yes/no)",
         type: "choice",
         choices: [
           { label: "yes", value: "yes" },
@@ -269,7 +545,6 @@ function createFileSystem() {
   };
 }
 
-const themeOptions = ["default", "amber", "ice"];
 const spinnerNames = Object.keys(spinnerLibrary).filter((name) => {
   const spinner = spinnerLibrary[name];
   return spinner && Array.isArray(spinner.frames) && spinner.frames.length > 0;
@@ -280,8 +555,9 @@ const thinkingSpinner =
   spinnerLibrary[thinkingSpinnerName] ||
   spinnerLibrary.braille ||
   spinnerLibrary.helix;
-const DEFAULT_COMMAND_DELAY = 520;
-const DEFAULT_STEP_DELAY = 45;
+const DEFAULT_COMMAND_DELAY = 900;
+const DEFAULT_STEP_DELAY = 85;
+const FLOW_COMMAND_DELAY = 650;
 
 const baseCommands = [
   {
@@ -293,17 +569,7 @@ const baseCommands = [
       if (args.length) {
         return buildCommandHelp(args[0]);
       }
-      const events = [printLine("Available commands:", "success")];
-      const sorted = [...new Set(baseCommands.map((cmd) => cmd.name))].sort();
-      sorted.forEach((name) => {
-        const cmd = commandRegistry.get(name);
-        if (cmd) {
-          events.push(printLine(`${cmd.name.padEnd(10)} ${cmd.description}`));
-        }
-      });
-      events.push(printLine("Try: man <command>", "success"));
-      events.push(printLine("Press Tab to autocomplete. Double-Tab lists matches.", "success"));
-      return events;
+      return [enterFlow("help-picker")];
     },
   },
   {
@@ -313,7 +579,7 @@ const baseCommands = [
     usage: "man <command>",
     handler: (args) => {
       if (!args.length) {
-        return [printLine("man: what manual page do you want?", "error")];
+        return [enterFlow("help-picker")];
       }
       return buildCommandHelp(args[0]);
     },
@@ -323,7 +589,7 @@ const baseCommands = [
     aliases: [],
     description: "Print working directory.",
     usage: "pwd",
-    handler: () => [printLine(shellState.cwd), printLine("Use: ls to inspect this directory.", "success")],
+    handler: () => [printLine(shellState.cwd)],
   },
   {
     name: "whoami",
@@ -331,11 +597,7 @@ const baseCommands = [
     description: "Inspect the current session.",
     usage: "whoami",
     thinkingLabel: "Profiling session...",
-    handler: async () => {
-      const events = await getSessionSnapshot();
-      events.push(printLine("Try: contact, portfolio, or bookmarks next.", "success"));
-      return events;
-    },
+    handler: async () => getSessionSnapshot(),
   },
   {
     name: "ls",
@@ -353,12 +615,9 @@ const baseCommands = [
         return [printLine(`ls: ${target}: No such file or directory`, "error")];
       }
       if (node.type !== "dir") {
-        return [printLine(target), printLine("Use: open <target> to inspect or queue it.", "success")];
+        return [printLine(target)];
       }
-      return [
-        htmlLine(formatDirectoryListing(node.entries || {})),
-        printLine("Use: cd <dir>, cat <file>, or open <target>.", "success"),
-      ];
+      return [htmlLine(formatDirectoryListing(node.entries || {}))];
     },
   },
   {
@@ -406,62 +665,42 @@ const baseCommands = [
       if (node.binary) {
         return [printLine(`cat: ${target}: Binary file`, "error")];
       }
-      return [printLine(getFileContent(node)), printLine("Use: open <target> if this file maps to a link.", "success")];
+      return [printLine(getFileContent(node))];
+    },
+  },
+  {
+    name: "preview",
+    aliases: [],
+    description: "Preview a project, bookmark, contact link, or file.",
+    usage: "preview <file|url|project|bookmark|contact>",
+    runDelay: 150,
+    stepDelay: 20,
+    thinkingLabel: "Working...",
+    handler: (args) => {
+      if (!args.length) {
+        return [printLine("preview: missing target. Usage: preview <target>", "error")];
+      }
+      return previewTarget(args.join(" "));
     },
   },
   {
     name: "open",
     aliases: [],
-    description: "Queue a link to open, or open the queued link.",
-    usage: "open [file|url|project|bookmark]",
+    description: "Open a target directly, or open the last previewed target.",
+    usage: "open [file|url|project|bookmark|contact]",
     runDelay: 150,
     stepDelay: 20,
     thinkingLabel: "Working...",
     handler: (args) => {
       if (!args.length) {
         if (!pendingOpenTarget) {
-          return [printLine("open: no queued link. Try `open <target>` first.", "error")];
+          return [printLine("open: no queued link. Try `preview <target>` first.", "error")];
         }
         const { url } = pendingOpenTarget;
         pendingOpenTarget = null;
         return [openUrl(url)];
       }
-      const target = args.join(" ");
-      const url = normalizeUrl(target);
-      if (url) {
-        return queueOpenTarget(`URL: ${url}`, url, [
-          printLine(`URL: ${url}`),
-        ]);
-      }
-
-      const app = findApp(target);
-      if (app) {
-        return describeBookmark(app);
-      }
-
-      const project = findProject(target);
-      if (project) {
-        return describeProject(project);
-      }
-
-      const resolved = resolvePath(target);
-      const node = getNode(resolved);
-      if (node && node.type === "file") {
-        if (node.openUrl) {
-          return queueOpenTarget(target, node.openUrl, [
-            printLine(`File: ${target}`, "success"),
-            printLine(`Open: ${node.openUrl}`),
-          ]);
-        }
-        if (isOpenableFile(target)) {
-          return queueOpenTarget(target, target, [
-            printLine(`File: ${target}`, "success"),
-            printLine(`Open: ${target}`),
-          ]);
-        }
-        return [printLine(`open: ${target}: not a supported file type`, "error")];
-      }
-      return [printLine(`open: ${target}: No such file or app`, "error")];
+      return openTargetDirectly(args.join(" "));
     },
   },
   {
@@ -481,95 +720,61 @@ const baseCommands = [
   {
     name: "about",
     aliases: [],
-    description: "Short intro and suggested next steps.",
+    description: "Browse intro sections.",
     usage: "about",
-    handler: () => [
-      printLine("Hi there - I'm Nikki, a product manager based in NYC."),
-      printLine("Currently Product Manager at EliseAI. Previously at Spline, Clearing Health, Better.com, Dropbox, and Atlassian."),
-      printLine("I'm interested in product, storytelling, creative tech, and small AI-powered experiments."),
-      printLine("Try: portfolio, bookmarks, os, contact, ai", "success"),
-      printLine("Tip: press Tab to autocomplete commands.", "success"),
-    ],
+    handler: () => [enterFlow("about-browser")],
   },
   {
     name: "portfolio",
     aliases: [],
-    description: "List featured projects.",
-    usage: "portfolio",
+    description: "Browse projects by filter.",
+    usage: "portfolio [featured|recent|web|ios|all]",
     runDelay: 80,
     stepDelay: 25,
     thinkingLabel: "Working...",
-    handler: () => {
-      const events = [printLine("Projects:", "success")];
-      projectData.forEach((project) => {
-        events.push(
-          printLine(`- ${project.name} (${project.slug}): ${project.summary}`)
-        );
-      });
-      events.push(printLine("Use: open <project>", "success"));
-      return events;
+    handler: (args) => {
+      if (!args.length) {
+        return [enterFlow("portfolio-picker")];
+      }
+      const filter = args[0].toLowerCase();
+      if (!projectFilterOptions.includes(filter)) {
+        return buildPortfolioEvents(args[0]);
+      }
+      return [enterFlow("portfolio-picker", { stepId: "project", answers: { filter } })];
     },
   },
   {
     name: "bookmarks",
     aliases: [],
-    description: "List saved links and favorite tools.",
-    usage: "bookmarks",
+    description: "Browse saved links by filter.",
+    usage: "bookmarks [featured|ai|build|work]",
     runDelay: 80,
     stepDelay: 25,
     thinkingLabel: "Working...",
-    handler: () => {
-      const events = [printLine("Bookmarks:", "success")];
-      bookmarksData.forEach((app) => {
-        events.push(printLine(`- ${app.name} (${app.slug}): ${app.description}`));
-      });
-      events.push(printLine("Use: launch <bookmark> or open <url>", "success"));
-      return events;
+    handler: (args) => {
+      if (!args.length) {
+        return [enterFlow("bookmarks-picker")];
+      }
+      const filter = args[0].toLowerCase();
+      if (!bookmarkFilterOptions.includes(filter)) {
+        return buildBookmarksEvents(args[0]);
+      }
+      return [enterFlow("bookmarks-picker", { stepId: "bookmark", answers: { filter } })];
     },
   },
   {
     name: "os",
     aliases: [],
-    description: "Queue Nikki's desktop OS project for opening.",
+    description: "Browse Nikki's desktop OS project.",
     usage: "os",
-    handler: () =>
-      queueOpenTarget("Terminal OS", "https://nikkihnguyen.com/os/", [
-        printLine("Terminal OS", "success"),
-        printLine("Nikki's desktop-style personal OS experiment."),
-        printLine("Open: https://nikkihnguyen.com/os/"),
-      ]),
-  },
-  {
-    name: "launch",
-    aliases: [],
-    description: "Queue a listed bookmark for opening.",
-    usage: "launch <bookmark>",
-    handler: (args) => {
-      const slug = args[0];
-      if (!slug) {
-        return [printLine("Missing bookmark slug. Usage: launch <bookmark>", "error")];
-      }
-      const app = findApp(slug);
-      if (!app) {
-        return [printLine(`Bookmark not found: ${slug}. Usage: launch <bookmark>`, "error")];
-      }
-      return describeBookmark(app);
-    },
+    handler: () => [enterFlow("os-browser")],
   },
   {
     name: "contact",
     aliases: [],
-    description: "Show contact links.",
+    description: "Browse contact links.",
     usage: "contact",
-    handler: () => [
-      linkLine("Email", "mailto:nikki.nguyen8@gmail.com"),
-      linkLine("LinkedIn", "https://linkedin.com/in/nikkinguyen8/"),
-      linkLine("GitHub", "https://github.com/nikkihnguyen"),
-      linkLine("Twitter", "https://twitter.com/nikkihnguyen"),
-      linkLine("Instagram", "https://instagram.com/nikkihnguyen/"),
-      linkLine("Website", "https://nikkihnguyen.com/"),
-      printLine("Use: open <url> to queue any link for a new tab.", "success"),
-    ],
+    handler: () => [enterFlow("contact-browser")],
   },
   {
     name: "tour",
@@ -593,7 +798,7 @@ const baseCommands = [
     handler: (args) => {
       const nextTheme = args[0];
       if (!nextTheme) {
-        return [printLine(`Themes: ${themeOptions.join(", ")}`, "success")];
+        return [enterFlow("theme-picker")];
       }
       if (!themeOptions.includes(nextTheme)) {
         return [printLine(`Unknown theme. Choose: ${themeOptions.join(", ")}`, "error")];
@@ -646,8 +851,8 @@ function linkLine(text, url) {
   return { type: "link", text, url };
 }
 
-function enterFlow(flowId) {
-  return { type: "enterFlow", flowId };
+function enterFlow(flowId, initialState = {}) {
+  return { type: "enterFlow", flowId, initialState };
 }
 
 function enterAIMode() {
@@ -755,6 +960,35 @@ function getPromptText() {
   return `${shellState.user}@${shellState.host} ${path} %`;
 }
 
+function buildAboutEvents() {
+  return [
+    printLine("Hi there - I'm Nikki, a product manager based in NYC."),
+    printLine("Currently Product Manager at EliseAI. Previously at Spline, Clearing Health, Better.com, Dropbox, and Atlassian."),
+    printLine("I'm interested in product, storytelling, creative tech, and small AI-powered experiments."),
+  ];
+}
+
+function buildAboutSectionEvents(section) {
+  switch (section) {
+    case "current":
+      return [
+        printLine("Current", "success"),
+        printLine("Product Manager at EliseAI in NYC."),
+      ];
+    case "interests":
+      return [
+        printLine("Interests", "success"),
+        printLine("Product, storytelling, creative tech, and small AI-powered experiments."),
+      ];
+    case "bio":
+    default:
+      return [
+        printLine("Bio", "success"),
+        printLine("Nikki Nguyen is a product manager based in NYC."),
+      ];
+  }
+}
+
 function normalizeUrl(target) {
   if (!target) return "";
   const trimmed = target.trim();
@@ -776,6 +1010,15 @@ function findApp(target) {
   );
 }
 
+function findContactLink(target) {
+  const normalized = target.toLowerCase();
+  return contactLinks.find(
+    (item) =>
+      item.slug.toLowerCase() === normalized ||
+      item.name.toLowerCase() === normalized
+  );
+}
+
 function findProject(target) {
   const normalized = target.toLowerCase();
   return projectData.find(
@@ -785,12 +1028,77 @@ function findProject(target) {
   );
 }
 
+function getProjectList(filter = "featured") {
+  const normalized = (filter || "featured").toLowerCase();
+  if (normalized === "all") return projectData;
+  if (normalized === "recent") {
+    return [...projectData]
+      .sort((a, b) => new Date(b.date) - new Date(a.date))
+      .slice(0, 10);
+  }
+  if (normalized === "web" || normalized === "ios") {
+    return projectData.filter((item) => item.platform === normalized);
+  }
+  if (normalized === "featured") {
+    return featuredProjectSlugs
+      .map((slug) => projectData.find((item) => item.slug === slug))
+      .filter(Boolean);
+  }
+  return null;
+}
+
+function getBookmarkList(filter = "featured") {
+  const normalized = (filter || "featured").toLowerCase();
+  if (normalized === "featured") {
+    return featuredBookmarkSlugs
+      .map((slug) => bookmarksData.find((item) => item.slug === slug))
+      .filter(Boolean);
+  }
+  if (bookmarkFilterOptions.includes(normalized)) {
+    return bookmarksData.filter((item) => item.category === normalized);
+  }
+  return null;
+}
+
+function formatProjectLine(project) {
+  return `- ${project.name} (${project.slug}): ${project.summary}`;
+}
+
+function formatBookmarkLine(bookmark) {
+  return `- ${bookmark.name} (${bookmark.slug}): ${bookmark.description}`;
+}
+
+function buildPortfolioEvents(filter = "featured", options = {}) {
+  const normalized = (filter || "featured").toLowerCase();
+  const projects = getProjectList(normalized);
+  if (!projects) {
+    return [printLine(`Unknown portfolio filter: ${filter}. Try: ${projectFilterOptions.join(", ")}`, "error")];
+  }
+  const limit = options.limit || projects.length;
+  const events = [printLine(`Projects (${normalized}):`, "success")];
+  projects.slice(0, limit).forEach((project) => events.push(printLine(formatProjectLine(project))));
+  return events;
+}
+
+function buildBookmarksEvents(filter = "featured", options = {}) {
+  const normalized = (filter || "featured").toLowerCase();
+  const bookmarks = getBookmarkList(normalized);
+  if (!bookmarks) {
+    return [printLine(`Unknown bookmarks filter: ${filter}. Try: ${bookmarkFilterOptions.join(", ")}`, "error")];
+  }
+  const limit = options.limit || bookmarks.length;
+  const events = [printLine(`Bookmarks (${normalized}):`, "success")];
+  bookmarks.slice(0, limit).forEach((bookmark) => events.push(printLine(formatBookmarkLine(bookmark))));
+  return events;
+}
+
+function buildContactEvents() {
+  return contactLinks.map((item) => linkLine(item.name, item.url));
+}
+
 function queueOpenTarget(label, url, events = []) {
   pendingOpenTarget = { label, url };
-  return [
-    ...events,
-    printLine("Type `open` to open in a new tab.", "success"),
-  ];
+  return [...events];
 }
 
 function describeBookmark(bookmark) {
@@ -798,6 +1106,14 @@ function describeBookmark(bookmark) {
     printLine(`Bookmark: ${bookmark.name}`, "success"),
     printLine(bookmark.description),
     printLine(`Open: ${bookmark.url}`),
+  ]);
+}
+
+function describeContactLink(contactLink) {
+  return queueOpenTarget(contactLink.name, contactLink.url, [
+    printLine(`Contact: ${contactLink.name}`, "success"),
+    printLine(contactLink.description),
+    printLine(`Open: ${contactLink.url}`),
   ]);
 }
 
@@ -825,17 +1141,106 @@ function describeProject(project) {
   return events;
 }
 
+function previewTarget(target) {
+  const url = normalizeUrl(target);
+  if (url) {
+    return queueOpenTarget(`URL: ${url}`, url, [printLine(`URL: ${url}`)]);
+  }
+
+  const contact = findContactLink(target);
+  if (contact) return describeContactLink(contact);
+
+  const app = findApp(target);
+  if (app) return describeBookmark(app);
+
+  const project = findProject(target);
+  if (project) return describeProject(project);
+
+  const resolved = resolvePath(target);
+  const node = getNode(resolved);
+  if (node && node.type === "file") {
+    if (node.openUrl) {
+      return queueOpenTarget(target, node.openUrl, [
+        printLine(`File: ${target}`, "success"),
+        printLine(`Open: ${node.openUrl}`),
+      ]);
+    }
+    if (isOpenableFile(target)) {
+      return queueOpenTarget(target, target, [
+        printLine(`File: ${target}`, "success"),
+        printLine(`Open: ${target}`),
+      ]);
+    }
+    return [printLine(`preview: ${target}: not a supported file type`, "error")];
+  }
+
+  return [printLine(`preview: ${target}: no matching project, bookmark, contact, or file`, "error")];
+}
+
+function openTargetDirectly(target) {
+  const url = normalizeUrl(target);
+  if (url) {
+    pendingOpenTarget = null;
+    return [openUrl(url)];
+  }
+
+  const contact = findContactLink(target);
+  if (contact) {
+    pendingOpenTarget = null;
+    return [openUrl(contact.url)];
+  }
+
+  const app = findApp(target);
+  if (app) {
+    pendingOpenTarget = null;
+    return [openUrl(app.url)];
+  }
+
+  const project = findProject(target);
+  if (project) {
+    if (project.url) {
+      pendingOpenTarget = null;
+      return [openUrl(project.url)];
+    }
+    return [printLine(`open: ${target}: no public link yet. Try \`preview ${project.slug}\` for details.`, "error")];
+  }
+
+  const resolved = resolvePath(target);
+  const node = getNode(resolved);
+  if (node && node.type === "file") {
+    if (node.openUrl) {
+      pendingOpenTarget = null;
+      return [openUrl(node.openUrl)];
+    }
+    if (isOpenableFile(target)) {
+      pendingOpenTarget = null;
+      return [openUrl(target)];
+    }
+    return [printLine(`open: ${target}: not a supported file type`, "error")];
+  }
+
+  return [printLine(`open: ${target}: no matching project, bookmark, contact, or file`, "error")];
+}
+
 function buildCommandHelp(commandName) {
   const entry = commandRegistry.get(commandName);
   if (!entry) {
     return [printLine(`help: no help topics match '${commandName}'`, "error")];
   }
   const aliases = entry.aliases.length ? entry.aliases.join(", ") : "none";
+  const examples = {
+    portfolio: "Examples: `portfolio featured`, `portfolio web`, `preview computervision`",
+    bookmarks: "Examples: `bookmarks ai`, `bookmarks work`, `preview cursor`",
+    preview: "Examples: `preview computervision`, `preview github`, `preview about.txt`",
+    open: "Examples: `open github`, `open computervision`, `open` after a preview",
+    contact: "Examples: `contact`, `preview github`, `open linkedin`",
+  };
   return [
     printLine(`${entry.name} - ${entry.description}`, "success"),
     printLine(`usage: ${entry.usage}`),
     printLine(`aliases: ${aliases}`),
-    printLine("Press Tab to autocomplete commands and arguments.", "success"),
+    ...(examples[entry.name] ? [printLine(examples[entry.name])] : []),
+    printLine("Tab completes arguments too.", "success"),
   ];
 }
 
@@ -1051,6 +1456,13 @@ function appendPanel(title, content) {
   addOutputNode(container);
 }
 
+function createOutputLine(tone = "") {
+  const line = document.createElement("div");
+  line.className = "output-line";
+  if (tone) line.classList.add(tone);
+  return line;
+}
+
 function startThinkingIndicator(label = "Thinking...") {
   stopThinkingIndicator();
   if (!thinkingSpinner?.frames?.length) return;
@@ -1113,6 +1525,124 @@ function addOutputNode(node) {
     isUserAtBottom = false;
     updateJumpButton();
   }
+}
+
+function getFlowStepPrompt(step, answers = {}) {
+  if (!step) return "";
+  return typeof step.prompt === "function" ? step.prompt(answers) : step.prompt || "";
+}
+
+function getFlowStepChoices(step, answers = {}) {
+  if (!step) return [];
+  const choices = typeof step.choices === "function" ? step.choices(answers) : step.choices;
+  return Array.isArray(choices) ? choices : [];
+}
+
+function renderFlowStepContent(node, step, answers = {}, selectedIndex = 0) {
+  node.innerHTML = "";
+  if (node === flowEl) {
+    node.className = "terminal__flow flow-step";
+  } else {
+    node.className = "flow-step";
+  }
+  const prompt = document.createElement("div");
+  prompt.className = "flow-step__prompt";
+  prompt.textContent = getFlowStepPrompt(step, answers);
+  node.appendChild(prompt);
+
+  const choices = getFlowStepChoices(step, answers);
+  if (step.type === "choice" && choices.length) {
+    choices.forEach((choice, index) => {
+      const isSelected = index === selectedIndex;
+      const choiceNode = document.createElement("div");
+      choiceNode.className = isSelected ? "flow-step__choice is-selected" : "flow-step__choice";
+      choiceNode.dataset.choiceIndex = String(index);
+
+      const marker = document.createElement("span");
+      marker.className = "flow-step__marker";
+      marker.textContent = isSelected ? "→" : "·";
+
+      const label = document.createElement("span");
+      label.className = "flow-step__label";
+      label.textContent = choice.label;
+
+      choiceNode.appendChild(marker);
+      choiceNode.appendChild(label);
+      node.appendChild(choiceNode);
+    });
+  }
+}
+
+function renderFlowStepNode(step) {
+  if (!flowEl) return;
+  flowEl.hidden = false;
+  renderFlowStepContent(flowEl, step, flowState?.answers || {}, flowState?.selectedChoiceIndex || 0);
+  activeFlowStepNode = flowEl;
+}
+
+function updateFlowStepNode() {
+  if (!activeFlowStepNode || !currentFlow || !flowState) return;
+  const step = currentFlow.steps[flowState.stepId];
+  if (!step) return;
+  const choices = getFlowStepChoices(step, flowState.answers);
+  const renderedChoices = activeFlowStepNode.querySelectorAll(".flow-step__choice");
+
+  if (
+    step.type !== "choice" ||
+    !choices.length ||
+    renderedChoices.length !== choices.length
+  ) {
+    renderFlowStepContent(
+      activeFlowStepNode,
+      step,
+      flowState.answers,
+      flowState.selectedChoiceIndex || 0
+    );
+    return;
+  }
+
+  const promptNode = activeFlowStepNode.querySelector(".flow-step__prompt");
+  if (promptNode) {
+    promptNode.textContent = getFlowStepPrompt(step, flowState.answers);
+  }
+
+  renderedChoices.forEach((choiceNode, index) => {
+    const isSelected = index === (flowState.selectedChoiceIndex || 0);
+    choiceNode.classList.toggle("is-selected", isSelected);
+
+    const markerNode = choiceNode.querySelector(".flow-step__marker");
+    if (markerNode) {
+      markerNode.textContent = isSelected ? "→" : "·";
+    }
+
+    const labelNode = choiceNode.querySelector(".flow-step__label");
+    if (labelNode) {
+      labelNode.textContent = choices[index]?.label || "";
+    }
+  });
+}
+
+function moveFlowSelection(delta) {
+  if (mode !== "flow" || !currentFlow || !flowState) return false;
+  const step = currentFlow.steps[flowState.stepId];
+  const choices = getFlowStepChoices(step, flowState.answers);
+  if (!step || step.type !== "choice" || !choices.length) return false;
+  const count = choices.length;
+  const currentIndex = typeof flowState.selectedChoiceIndex === "number" ? flowState.selectedChoiceIndex : 0;
+  flowState.selectedChoiceIndex = (currentIndex + delta + count) % count;
+  inputEl.value = choices[flowState.selectedChoiceIndex]?.value || "";
+  updateFlowStepNode();
+  updateCaret();
+  updateInputAssist();
+  return true;
+}
+
+function getSelectedFlowChoiceValue() {
+  if (mode !== "flow" || !currentFlow || !flowState) return "";
+  const step = currentFlow.steps[flowState.stepId];
+  const choices = getFlowStepChoices(step, flowState.answers);
+  if (!step || step.type !== "choice" || !choices.length) return "";
+  return choices[flowState.selectedChoiceIndex || 0]?.value || "";
 }
 
 function updateCaret() {
@@ -1217,14 +1747,13 @@ function getCompletionCandidates(command, args, currentToken) {
   }
 
   switch (command) {
-    case "launch":
-      if (args.length > 1) return [];
-      return bookmarksData.map((item) => item.slug);
+    case "preview":
     case "open":
       if (args.length > 1) return [];
       return [
         ...projectData.map((item) => item.slug),
         ...bookmarksData.map((item) => item.slug),
+        ...contactLinks.map((item) => item.slug),
         "about.txt",
         "portfolio.txt",
         "bookmarks.txt",
@@ -1242,6 +1771,12 @@ function getCompletionCandidates(command, args, currentToken) {
     case "theme":
       if (args.length > 1) return [];
       return themeOptions;
+    case "portfolio":
+      if (args.length > 1) return [];
+      return projectFilterOptions;
+    case "bookmarks":
+      if (args.length > 1) return [];
+      return bookmarkFilterOptions;
     case "help":
     case "man":
       if (args.length > 1) return [];
@@ -1251,7 +1786,97 @@ function getCompletionCandidates(command, args, currentToken) {
   }
 }
 
+function getCompletionHint(command) {
+  switch (command) {
+    case "preview":
+    case "open":
+      return "project, bookmark, contact, file, or url";
+    case "portfolio":
+      return "portfolio filter";
+    case "bookmarks":
+      return "bookmarks filter";
+    case "cat":
+      return "file name";
+    case "cd":
+    case "ls":
+      return "path";
+    case "theme":
+      return "theme";
+    case "help":
+    case "man":
+      return "command";
+    default:
+      return "target";
+  }
+}
+
+function findFlowChoiceMatchIndex(rawValue) {
+  if (mode !== "flow" || !currentFlow || !flowState) return -1;
+  const step = currentFlow.steps[flowState.stepId];
+  const choices = getFlowStepChoices(step, flowState.answers);
+  const normalized = (rawValue || "").trim().toLowerCase();
+  if (!normalized) return -1;
+  return choices.findIndex((choice) => {
+    const value = String(choice.value || "").toLowerCase();
+    const label = String(choice.label || "").replace(/^↩\s*/u, "").toLowerCase();
+    return value.startsWith(normalized) || label.startsWith(normalized);
+  });
+}
+
+function getFlowCompletionState(rawValue) {
+  const step = currentFlow?.steps?.[flowState?.stepId];
+  const choices = getFlowStepChoices(step, flowState?.answers || {});
+  const selectedValue =
+    choices[typeof flowState?.selectedChoiceIndex === "number" ? flowState.selectedChoiceIndex : 0]?.value || "";
+  if (!step || step.type !== "choice" || !choices.length) {
+    return {
+      matches: [],
+      listMatches: [],
+      bestMatch: "",
+      completedValue: "",
+      helperText: "Flow mode: answer the current prompt, or type exit to leave.",
+    };
+  }
+
+  const normalized = (rawValue || "").trim().toLowerCase();
+  if (!normalized) {
+    return {
+      matches: [],
+      listMatches: choices.map((choice) => String(choice.value)),
+      bestMatch: "",
+      completedValue: "",
+      helperText: selectedValue ? `Selected: ${selectedValue}  ·  Arrow keys move  ·  Tab cycles.` : "Arrow keys move. Tab cycles.",
+    };
+  }
+
+  const choiceMatches = choices.filter((choice) => {
+    const value = String(choice.value || "").toLowerCase();
+    const label = String(choice.label || "").replace(/^↩\s*/u, "").toLowerCase();
+    return value.startsWith(normalized) || label.startsWith(normalized);
+  });
+  const bestChoice = choiceMatches[0] || null;
+  const bestMatch = bestChoice ? String(bestChoice.value) : "";
+  let helperText = "No matches.";
+  if (choiceMatches.length === 1) {
+    helperText = `Tab completes to ${bestMatch}`;
+  } else if (choiceMatches.length > 1) {
+    helperText = `Tab completes to ${bestMatch}. ${choiceMatches.length} matches.`;
+  }
+
+  return {
+    matches: choiceMatches.map((choice) => String(choice.value)),
+    listMatches: choiceMatches.map((choice) => String(choice.value)),
+    bestMatch,
+    completedValue: bestMatch,
+    helperText,
+  };
+}
+
 function getCompletionState(rawValue) {
+  if (mode === "flow") {
+    return getFlowCompletionState(rawValue);
+  }
+
   if (mode !== "shell") {
     return {
       matches: [],
@@ -1272,7 +1897,9 @@ function getCompletionState(rawValue) {
       matches: [],
       bestMatch: "",
       completedValue: "",
-      helperText: "Try about, portfolio, bookmarks, contact, or whoami. Press Tab to autocomplete.",
+      helperText: pendingOpenTarget
+        ? "Queued target ready. Type open."
+        : "Try about, portfolio, bookmarks, contact, or whoami.",
     };
   }
 
@@ -1313,13 +1940,13 @@ function getCompletionState(rawValue) {
     }
   }
 
-  let helperText = "Press Tab to autocomplete.";
+  let helperText = "Tab to complete.";
   if (!isCommandPosition && !currentToken) {
-    helperText = `Type a ${command} target, or press Tab twice to list options.`;
+    helperText = `${getCompletionHint(command)}. Tab twice lists.`;
   } else if (matches.length === 1) {
     helperText = `Tab completes to ${bestMatch}`;
   } else if (matches.length > 1) {
-    helperText = `Tab completes to ${bestMatch}. Double-Tab lists ${matches.length} matches.`;
+    helperText = `Tab completes to ${bestMatch}. ${matches.length} matches.`;
   } else {
     helperText = "No autocomplete matches.";
   }
@@ -1344,7 +1971,7 @@ function updateInputAssist() {
       : "";
 
   const shouldShowGhost =
-    mode === "shell" &&
+    (mode === "shell" || mode === "flow") &&
     !!inputEl.value &&
     !!suffix &&
     selectionAtEnd &&
@@ -1364,9 +1991,14 @@ function setRunning(next) {
   isRunning = next;
   inputEl.disabled = next;
   if (!next) {
-    inputEl.focus({ preventScroll: true });
-    updateCaret();
+    focusInput();
   }
+  updateInputAssist();
+}
+
+function focusInput() {
+  inputEl.focus({ preventScroll: true });
+  updateCaret();
   updateInputAssist();
 }
 
@@ -1399,9 +2031,6 @@ function queueEvents(events, options = {}) {
   let totalDelay = initialDelay;
   queuedEvents.forEach((event, index) => {
     scheduleEvent(() => {
-      if (showThinking && index === 0) {
-        stopThinkingIndicator();
-      }
       renderEvent(event);
     }, totalDelay);
     totalDelay += stepDelay;
@@ -1453,6 +2082,22 @@ function interruptRunning() {
   clearPendingTimers();
   setRunning(false);
   return true;
+}
+
+function queueFlowSubmission(value) {
+  setRunning(true);
+  startThinkingIndicator("Working...");
+  scheduleEvent(() => {
+    stopThinkingIndicator();
+    handleFlowInput(value);
+  }, FLOW_COMMAND_DELAY);
+  scheduleEvent(() => {
+    setRunning(false);
+    if (mode === "flow") {
+      focusInput();
+    }
+    saveOutput();
+  }, FLOW_COMMAND_DELAY);
 }
 
 function runCommand(input) {
@@ -1536,7 +2181,7 @@ function renderEvent(event) {
       appendLine(`Opening ${event.url}...`, "success");
       break;
     case "enterFlow":
-      startFlow(event.flowId);
+      startFlow(event.flowId, event.initialState || {});
       break;
     case "enterAIMode":
       startAIMode();
@@ -1546,7 +2191,7 @@ function renderEvent(event) {
   }
 }
 
-function startFlow(flowId) {
+function startFlow(flowId, initialState = {}) {
   const flow = flows[flowId];
   if (!flow) {
     appendLine(`Flow not found: ${flowId}`, "error");
@@ -1556,13 +2201,15 @@ function startFlow(flowId) {
   currentFlow = flow;
   flowState = {
     id: flowId,
-    stepId: flow.startStepId,
-    answers: {},
-    stack: [],
+    stepId: initialState.stepId || flow.startStepId,
+    answers: initialState.answers || {},
+    stack: initialState.stack || [],
+    selectedChoiceIndex: 0,
   };
   updatePrompt();
   appendLine(`Entering flow: ${flow.name}`, "success");
   printFlowStep();
+  focusInput();
 }
 
 function printFlowStep() {
@@ -1573,23 +2220,43 @@ function printFlowStep() {
     exitFlow();
     return;
   }
-  let promptText = step.prompt;
-  if (step.type === "choice" && step.choices) {
-    const choicesText = step.choices
-      .map((choice, index) => `${index + 1}) ${choice.label}`)
-      .join(" ");
-    promptText = `${promptText}\n${choicesText}`;
+  const flowIdBeforeEvents = currentFlow.id;
+  const stepEvents =
+    typeof step.events === "function" ? step.events(flowState.answers) : step.events;
+  if (Array.isArray(stepEvents)) {
+    stepEvents.forEach((event) => renderEvent(event));
   }
-  appendLine(promptText, "success");
+  if (!currentFlow || currentFlow.id !== flowIdBeforeEvents) {
+    return;
+  }
+  if (step.autoExit) {
+    exitFlow();
+    return;
+  }
+  flowState.selectedChoiceIndex = 0;
+  if (step.type === "choice") {
+    const choices = getFlowStepChoices(step, flowState.answers);
+    inputEl.value = choices[0]?.value || "";
+  } else {
+    inputEl.value = "";
+  }
+  renderFlowStepNode(step);
   if (step.links && Array.isArray(step.links)) {
     step.links.forEach((item) => {
       appendLink(item.text, item.url);
     });
   }
+  if (mode === "flow") {
+    focusInput();
+  }
 }
 
 function handleFlowInput(input) {
-  const trimmed = input.trim();
+  const currentStep = currentFlow?.steps?.[flowState?.stepId];
+  let trimmed = input.trim();
+  if (!trimmed && currentStep?.type === "choice") {
+    trimmed = getSelectedFlowChoiceValue();
+  }
   if (!trimmed) return;
 
   const reserved = trimmed.toLowerCase();
@@ -1602,6 +2269,8 @@ function handleFlowInput(input) {
     flowState.stepId = currentFlow.startStepId;
     flowState.answers = {};
     flowState.stack = [];
+    flowState.selectedChoiceIndex = 0;
+    inputEl.value = "";
     appendLine("Flow restarted.", "success");
     printFlowStep();
     return;
@@ -1630,17 +2299,18 @@ function handleFlowInput(input) {
   }
 
   let answer = trimmed;
-
-  if (step.type === "choice" && step.choices) {
+  const choices = getFlowStepChoices(step, flowState.answers);
+  if (step.type === "choice" && choices.length) {
     const index = Number.parseInt(trimmed, 10);
-    if (!Number.isNaN(index) && step.choices[index - 1]) {
-      answer = step.choices[index - 1].value;
+    if (!Number.isNaN(index) && choices[index - 1]) {
+      answer = choices[index - 1].value;
     } else {
-      const match = step.choices.find(
+      const match = choices.find(
         (choice) => choice.value === trimmed || choice.label === trimmed
       );
       if (match) {
         answer = match.value;
+        flowState.selectedChoiceIndex = choices.findIndex((choice) => choice.value === match.value);
       } else {
         appendLine("Invalid choice. Try one of the listed options.", "error");
         return;
@@ -1675,7 +2345,13 @@ function handleFlowInput(input) {
     return;
   }
 
+  if (nextStep === "exit") {
+    exitFlow();
+    return;
+  }
+
   flowState.stepId = nextStep;
+  flowState.selectedChoiceIndex = 0;
   printFlowStep();
 }
 
@@ -1683,9 +2359,15 @@ function exitFlow() {
   mode = "shell";
   currentFlow = null;
   flowState = null;
+  activeFlowStepNode = null;
+  if (flowEl) {
+    flowEl.innerHTML = "";
+    flowEl.hidden = true;
+  }
   updatePrompt();
   appendLine("Returned to shell.", "success");
   saveOutput();
+  focusInput();
 }
 
 function startAIMode() {
@@ -1725,7 +2407,7 @@ function handleAIInput(input) {
   appendLine(`You: ${trimmed}`);
   const reply = generateAIReply(trimmed);
   queueEvents([printLine(`AI: ${reply}`, "success")], {
-    initialDelay: 1200,
+    initialDelay: 1600,
     stepDelay: 0,
     thinkingLabel: "Thinking...",
   });
@@ -1737,7 +2419,7 @@ function generateAIReply(input) {
     return "Try `portfolio` to list projects from the desktop OS portfolio, then `open <slug>` for details.";
   }
   if (lower.includes("bookmark") || lower.includes("tool")) {
-    return "Use `bookmarks` to browse Nikki's saved links and tools, then `launch <bookmark>` to open one.";
+    return "Use `bookmarks` to browse Nikki's saved links and tools, then `preview <bookmark>` or `open <bookmark>`.";
   }
   if (lower.includes("contact") || lower.includes("email")) {
     return "Use `contact` for Nikki's email and social links.";
@@ -1883,7 +2565,37 @@ function printWelcome() {
   appendLine("Type 'help' to see available commands.");
 }
 
+function handleFlowArrowKey(event) {
+  if (mode === "flow") {
+    const flowDirection = {
+      ArrowUp: -1,
+      ArrowLeft: -1,
+      ArrowDown: 1,
+      ArrowRight: 1,
+    }[event.key];
+
+    if (typeof flowDirection === "number") {
+      event.preventDefault();
+      event.stopPropagation();
+      focusInput();
+      moveFlowSelection(flowDirection);
+      return true;
+    }
+  }
+  return false;
+}
+
+document.addEventListener("keydown", (event) => {
+  if (handleFlowArrowKey(event)) {
+    return;
+  }
+}, true);
+
 inputEl.addEventListener("keydown", (event) => {
+  if (handleFlowArrowKey(event)) {
+    return;
+  }
+
   if (event.ctrlKey && !event.metaKey) {
     const key = event.key.toLowerCase();
     if (key === "a") {
@@ -1941,7 +2653,10 @@ inputEl.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
     if (isRunning) return;
-    const value = inputEl.value;
+    const value =
+      mode === "flow" && !inputEl.value.trim()
+        ? getSelectedFlowChoiceValue()
+        : inputEl.value;
     inputEl.value = "";
     updateCaret();
 
@@ -1949,15 +2664,18 @@ inputEl.addEventListener("keydown", (event) => {
       if (value.trim()) {
         shellHistory.push(value.trim());
         shellHistoryIndex = shellHistory.length;
+        runCommand(value);
+      } else {
+        appendCommandEcho("");
+        saveOutput();
+        scrollToBottom();
       }
-      runCommand(value);
       return;
     }
 
     if (mode === "flow") {
       appendCommandEcho(value);
-      handleFlowInput(value);
-      saveOutput();
+      queueFlowSubmission(value);
       return;
     }
 
@@ -1973,6 +2691,10 @@ inputEl.addEventListener("keydown", (event) => {
   }
 
   if (event.key === "ArrowUp") {
+    if (mode === "flow" && moveFlowSelection(-1)) {
+      event.preventDefault();
+      return;
+    }
     event.preventDefault();
     const history = mode === "ai" ? aiHistory : shellHistory;
     if (history.length === 0) return;
@@ -1986,6 +2708,10 @@ inputEl.addEventListener("keydown", (event) => {
   }
 
   if (event.key === "ArrowDown") {
+    if (mode === "flow" && moveFlowSelection(1)) {
+      event.preventDefault();
+      return;
+    }
     event.preventDefault();
     const history = mode === "ai" ? aiHistory : shellHistory;
     if (history.length === 0) return;
@@ -1998,10 +2724,28 @@ inputEl.addEventListener("keydown", (event) => {
     }
   }
 
-  if (event.key === "Tab" && mode === "shell") {
+  if (event.key === "ArrowLeft") {
+    if (mode === "flow" && moveFlowSelection(-1)) {
+      event.preventDefault();
+      return;
+    }
+  }
+
+  if (event.key === "ArrowRight") {
+    if (mode === "flow" && moveFlowSelection(1)) {
+      event.preventDefault();
+      return;
+    }
+  }
+
+  if (event.key === "Tab" && (mode === "shell" || mode === "flow")) {
     event.preventDefault();
     if (isRunning) return;
     const rawValue = inputEl.value;
+    if (mode === "flow" && !rawValue.trim()) {
+      moveFlowSelection(1);
+      return;
+    }
     const { matches, listMatches, completedValue } = getCompletionState(rawValue);
     if (!rawValue.trim()) return;
     if (matches.length === 1) {
@@ -2023,6 +2767,13 @@ inputEl.addEventListener("keydown", (event) => {
 
 inputEl.addEventListener("input", () => {
   tabState = { value: "", timestamp: 0 };
+  if (mode === "flow") {
+    const matchIndex = findFlowChoiceMatchIndex(inputEl.value);
+    if (matchIndex >= 0) {
+      flowState.selectedChoiceIndex = matchIndex;
+      updateFlowStepNode();
+    }
+  }
   updateCaret();
   updateInputAssist();
 });
@@ -2058,23 +2809,19 @@ outputEl.addEventListener("scroll", () => {
 });
 
 outputEl.addEventListener("click", () => {
-  inputEl.focus();
-  updateCaret();
-  updateInputAssist();
+  focusInput();
 });
 
 terminalEl.addEventListener("click", (event) => {
   const target = event.target;
   if (target instanceof HTMLElement && target.tagName === "BUTTON") return;
-  inputEl.focus();
-  updateCaret();
-  updateInputAssist();
+  focusInput();
 });
 
 if (jumpButton) {
   jumpButton.addEventListener("click", () => {
     scrollToBottom();
-    inputEl.focus();
+    focusInput();
   });
 }
 
@@ -2090,9 +2837,7 @@ if (!shellOutputHTML) {
 }
 updatePrompt();
 scrollToBottom();
-inputEl.focus();
+focusInput();
 if (inputWrapEl) {
   inputWrapEl.classList.add("is-focused");
 }
-updateCaret();
-updateInputAssist();

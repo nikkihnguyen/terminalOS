@@ -90,6 +90,19 @@ pre {
   background: var(--bg);
 }
 
+.terminal__flow {
+  padding: 0 20px 8px;
+  background: var(--bg);
+}
+
+.terminal__flow[hidden] {
+  display: none;
+}
+
+.terminal__flow .flow-step {
+  color: var(--success);
+}
+
 .terminal__prompt {
   color: var(--prompt);
   font-weight: 400;
@@ -189,6 +202,37 @@ pre {
 
 .output-line.success {
   color: var(--success);
+}
+
+.flow-step__prompt {
+  color: var(--success);
+  margin-bottom: 4px;
+}
+
+.flow-step__choice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: rgba(184, 247, 177, 0.72);
+  width: fit-content;
+  margin: 2px 0;
+}
+
+.flow-step__choice.is-selected {
+  color: var(--bg);
+  background: var(--success);
+  border-radius: 999px;
+  padding: 0 10px;
+  transform: translateX(8px);
+}
+
+.flow-step__marker {
+  min-width: 1ch;
+  text-align: center;
+}
+
+.flow-step__label {
+  white-space: pre-wrap;
 }
 
 .output-line--spinner {
