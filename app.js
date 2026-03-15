@@ -83,36 +83,42 @@ const bookmarksData = [
     slug: "spline",
     name: "Spline",
     description: "Collaborative 3D design tool Nikki previously helped grow.",
+    category: "work",
     url: "https://spline.design",
   },
   {
     slug: "perplexity",
     name: "Perplexity",
     description: "One of the AI tools listed in Nikki's bookmarks.",
+    category: "ai",
     url: "https://www.perplexity.ai/",
   },
   {
     slug: "claude",
     name: "Claude",
     description: "AI assistant bookmark from the desktop OS page.",
+    category: "ai",
     url: "https://claude.ai/",
   },
   {
     slug: "cursor",
     name: "Cursor",
     description: "AI coding tool listed in Nikki's bookmarks.",
+    category: "build",
     url: "https://www.cursor.com/",
   },
   {
     slug: "bolt",
     name: "Bolt",
     description: "Fast browser app builder from the bookmarks list.",
+    category: "build",
     url: "https://bolt.new/",
   },
   {
     slug: "terminal-os",
     name: "Terminal OS",
     description: "Nikki's desktop-style personal OS experiment.",
+    category: "work",
     url: "https://nikkihnguyen.com/os/",
   },
 ];
@@ -176,6 +182,9 @@ const featuredProjectSlugs = [
 const featuredBookmarkSlugs = ["terminal-os", "spline", "cursor", "claude"];
 const FLOW_BACK_VALUE = "back";
 const FLOW_EXIT_VALUE = "exit";
+const CLI_BOX_WIDTH = 68;
+const BOOT_STREAM_DELAY = 42;
+const BOOT_INIT_DELAY = 950;
 
 const flows = {
   "help-picker": {
@@ -960,11 +969,158 @@ function getPromptText() {
   return `${shellState.user}@${shellState.host} ${path} %`;
 }
 
+function wrapArtText(text, width) {
+  const paragraphs = String(text || "").split("\n");
+  const lines = [];
+
+  paragraphs.forEach((paragraph) => {
+    const normalized = paragraph.replace(/\s+/g, " ").trim();
+    if (!normalized) {
+      lines.push("");
+      return;
+    }
+
+    const words = normalized.split(" ");
+    let current = "";
+
+    words.forEach((word) => {
+      if (!current) {
+        current = word;
+        return;
+      }
+      const next = `${current} ${word}`;
+      if (next.length <= width) {
+        current = next;
+      } else {
+        lines.push(current);
+        current = word;
+      }
+    });
+
+    if (current) {
+      lines.push(current);
+    }
+  });
+
+  return lines.length ? lines : [""];
+}
+
+function padArtText(text, width) {
+  const value = String(text || "");
+  if (value.length >= width) return value.slice(0, width);
+  return `${value}${" ".repeat(width - value.length)}`;
+}
+
+function formatArtRows(rows = [], width = CLI_BOX_WIDTH) {
+  const formatted = [];
+
+  rows.forEach((row) => {
+    if (row === null || row === undefined) return;
+
+    if (typeof row === "string") {
+      formatted.push(...wrapArtText(row, width));
+      return;
+    }
+
+    if (row.divider) {
+      formatted.push("__DIVIDER__");
+      return;
+    }
+
+    if (typeof row.raw === "string") {
+      row.raw.split("\n").forEach((line) => {
+        formatted.push(line);
+      });
+      return;
+    }
+
+    if ("label" in row) {
+      const label = `${String(row.label).toUpperCase().padEnd(11)} `;
+      const wrapped = wrapArtText(String(row.value || ""), Math.max(10, width - label.length));
+      wrapped.forEach((line, index) => {
+        formatted.push(`${index === 0 ? label : " ".repeat(label.length)}${line}`);
+      });
+    }
+  });
+
+  return formatted;
+}
+
+function createArtBox({ title = "", rows = [], width = CLI_BOX_WIDTH }) {
+  const topLabel = title ? ` ${title} ` : "";
+  const top =
+    topLabel.length && topLabel.length < width
+      ? `╭${topLabel}${"─".repeat(width + 2 - topLabel.length)}╮`
+      : `╭${"─".repeat(width + 2)}╮`;
+  const bottom = `╰${"─".repeat(width + 2)}╯`;
+  const lines = [top];
+
+  formatArtRows(rows, width).forEach((row) => {
+    if (row === "__DIVIDER__") {
+      lines.push(`├${"─".repeat(width + 2)}┤`);
+      return;
+    }
+    lines.push(`│ ${padArtText(row, width)} │`);
+  });
+
+  lines.push(bottom);
+  return lines.join("\n");
+}
+
+function artLine(text, tone = "") {
+  return htmlLine(`<pre class="terminal-art">${escapeHTML(text)}</pre>`, tone);
+}
+
+function createArtOutputNode(className = "") {
+  const line = createOutputLine("success");
+  const art = document.createElement("pre");
+  art.className = className ? `terminal-art ${className}` : "terminal-art";
+  line.appendChild(art);
+  return { line, art };
+}
+
+function createWelcomeArt() {
+  return createArtBox({
+    title: "terminalOS",
+    rows: [
+      {
+        raw: [
+          " _                          _             _  ___   ____ ",
+          "| |_ ___ _ __ _ __ ___  _ __(_)_ __   __ _| |/ _ \\ / ___|",
+          "| __/ _ \\ '__| '_ ` _ \\| '__| | '_ \\ / _` | | | | | |    ",
+          "| ||  __/ |  | | | | | | |  | | | | | (_| | | |_| | |___ ",
+          " \\__\\___|_|  |_| |_| |_|_|  |_|_| |_|\\__,_|_|\\___/ \\____|",
+        ].join("\n"),
+      },
+      { divider: true },
+      "Nikki Nguyen's terminal portfolio.",
+      "Product, experiments, links, and a few playful tools.",
+      { divider: true },
+      { label: "surfaces", value: "about · portfolio · bookmarks · contact · os · whoami" },
+      { label: "hint", value: "Use arrows in menus. Tab completes. preview <target> shows detail." },
+    ],
+  });
+}
+
+function formatCollectionLine(index, total, slug, label, summary) {
+  const branch = index === total - 1 ? "└─" : "├─";
+  return `${branch} ${String(slug).padEnd(18)} ${label} — ${summary}`;
+}
+
 function buildAboutEvents() {
   return [
-    printLine("Hi there - I'm Nikki, a product manager based in NYC."),
-    printLine("Currently Product Manager at EliseAI. Previously at Spline, Clearing Health, Better.com, Dropbox, and Atlassian."),
-    printLine("I'm interested in product, storytelling, creative tech, and small AI-powered experiments."),
+    artLine(
+      createArtBox({
+        title: "ABOUT",
+        rows: [
+          "Nikki Nguyen is a product manager based in NYC.",
+          "Currently at EliseAI. Previously at Spline, Clearing Health, Better.com, Dropbox, and Atlassian.",
+          { divider: true },
+          { label: "focus", value: "product, storytelling, creative tech, small AI-powered experiments" },
+        ],
+      }),
+      "success"
+    ),
   ];
 }
 
@@ -972,19 +1128,46 @@ function buildAboutSectionEvents(section) {
   switch (section) {
     case "current":
       return [
-        printLine("Current", "success"),
-        printLine("Product Manager at EliseAI in NYC."),
+        artLine(
+          createArtBox({
+            title: "ABOUT / CURRENT",
+            rows: [
+              { label: "role", value: "Product Manager at EliseAI" },
+              { label: "base", value: "New York City" },
+              { label: "before", value: "Spline, Clearing Health, Better.com, Dropbox, Atlassian" },
+            ],
+          }),
+          "success"
+        ),
       ];
     case "interests":
       return [
-        printLine("Interests", "success"),
-        printLine("Product, storytelling, creative tech, and small AI-powered experiments."),
+        artLine(
+          createArtBox({
+            title: "ABOUT / INTERESTS",
+            rows: [
+              "• product systems",
+              "• storytelling through interfaces",
+              "• creative technology",
+              "• small AI-powered experiments",
+            ],
+          }),
+          "success"
+        ),
       ];
     case "bio":
     default:
       return [
-        printLine("Bio", "success"),
-        printLine("Nikki Nguyen is a product manager based in NYC."),
+        artLine(
+          createArtBox({
+            title: "ABOUT / BIO",
+            rows: [
+              "Nikki Nguyen is a product manager based in NYC.",
+              "She works across product, creative tooling, and fast interactive experiments.",
+            ],
+          }),
+          "success"
+        ),
       ];
   }
 }
@@ -1061,11 +1244,11 @@ function getBookmarkList(filter = "featured") {
 }
 
 function formatProjectLine(project) {
-  return `- ${project.name} (${project.slug}): ${project.summary}`;
+  return `${project.name} (${project.slug}): ${project.summary}`;
 }
 
 function formatBookmarkLine(bookmark) {
-  return `- ${bookmark.name} (${bookmark.slug}): ${bookmark.description}`;
+  return `${bookmark.name} (${bookmark.slug}): ${bookmark.description}`;
 }
 
 function buildPortfolioEvents(filter = "featured", options = {}) {
@@ -1075,8 +1258,22 @@ function buildPortfolioEvents(filter = "featured", options = {}) {
     return [printLine(`Unknown portfolio filter: ${filter}. Try: ${projectFilterOptions.join(", ")}`, "error")];
   }
   const limit = options.limit || projects.length;
-  const events = [printLine(`Projects (${normalized}):`, "success")];
-  projects.slice(0, limit).forEach((project) => events.push(printLine(formatProjectLine(project))));
+  const slicedProjects = projects.slice(0, limit);
+  const events = [
+    artLine(
+      createArtBox({
+        title: `PROJECTS / ${normalized.toUpperCase()}`,
+        rows: [
+          { label: "items", value: String(slicedProjects.length) },
+          { label: "hint", value: "preview <slug> for details, open <slug> to launch" },
+        ],
+      }),
+      "success"
+    ),
+  ];
+  slicedProjects.forEach((project, index) =>
+    events.push(printLine(formatCollectionLine(index, slicedProjects.length, project.slug, project.name, project.summary)))
+  );
   return events;
 }
 
@@ -1087,8 +1284,22 @@ function buildBookmarksEvents(filter = "featured", options = {}) {
     return [printLine(`Unknown bookmarks filter: ${filter}. Try: ${bookmarkFilterOptions.join(", ")}`, "error")];
   }
   const limit = options.limit || bookmarks.length;
-  const events = [printLine(`Bookmarks (${normalized}):`, "success")];
-  bookmarks.slice(0, limit).forEach((bookmark) => events.push(printLine(formatBookmarkLine(bookmark))));
+  const slicedBookmarks = bookmarks.slice(0, limit);
+  const events = [
+    artLine(
+      createArtBox({
+        title: `BOOKMARKS / ${normalized.toUpperCase()}`,
+        rows: [
+          { label: "items", value: String(slicedBookmarks.length) },
+          { label: "hint", value: "preview <slug> for details, open <slug> to launch" },
+        ],
+      }),
+      "success"
+    ),
+  ];
+  slicedBookmarks.forEach((bookmark, index) =>
+    events.push(printLine(formatCollectionLine(index, slicedBookmarks.length, bookmark.slug, bookmark.name, bookmark.description)))
+  );
   return events;
 }
 
@@ -1103,41 +1314,85 @@ function queueOpenTarget(label, url, events = []) {
 
 function describeBookmark(bookmark) {
   return queueOpenTarget(bookmark.name, bookmark.url, [
-    printLine(`Bookmark: ${bookmark.name}`, "success"),
-    printLine(bookmark.description),
-    printLine(`Open: ${bookmark.url}`),
+    artLine(
+      createArtBox({
+        title: `BOOKMARK / ${bookmark.name.toUpperCase()}`,
+        rows: [
+          bookmark.description,
+          { divider: true },
+          { label: "slug", value: bookmark.slug },
+          { label: "open", value: bookmark.url },
+        ],
+      }),
+      "success"
+    ),
   ]);
 }
 
 function describeContactLink(contactLink) {
   return queueOpenTarget(contactLink.name, contactLink.url, [
-    printLine(`Contact: ${contactLink.name}`, "success"),
-    printLine(contactLink.description),
-    printLine(`Open: ${contactLink.url}`),
+    artLine(
+      createArtBox({
+        title: `CONTACT / ${contactLink.name.toUpperCase()}`,
+        rows: [
+          contactLink.description,
+          { divider: true },
+          { label: "slug", value: contactLink.slug },
+          { label: "open", value: contactLink.url },
+        ],
+      }),
+      "success"
+    ),
   ]);
 }
 
 function describeProject(project) {
   const events = [
-    printLine(`Project: ${project.name}`, "success"),
-    printLine(project.summary),
-    printLine(`Date: ${project.date}`),
-    printLine(`Platform: ${project.platform}`),
-    printLine(`Stack: ${project.tech}`),
-    printLine(`Intent: ${project.intent}`),
-    printLine(`Build: ${project.build}`),
-    printLine(`Why it stands out: ${project.unique}`),
+    artLine(
+      createArtBox({
+        title: `PROJECT / ${project.name.toUpperCase()}`,
+        rows: [
+          project.summary,
+          { divider: true },
+          { label: "slug", value: project.slug },
+          { label: "date", value: project.date },
+          { label: "platform", value: project.platform },
+          { label: "stack", value: project.tech },
+          { label: "intent", value: project.intent },
+          { label: "build", value: project.build },
+          { label: "highlight", value: project.unique },
+        ],
+      }),
+      "success"
+    ),
   ];
 
   if (project.url) {
     return queueOpenTarget(project.name, project.url, [
       ...events,
-      printLine(`Open: ${project.url}`),
+      artLine(
+        createArtBox({
+          title: "ACTION",
+          rows: [
+            { label: "open", value: project.url },
+            { label: "next", value: "Type open to launch the queued target." },
+          ],
+        }),
+        "success"
+      ),
     ]);
   }
 
   pendingOpenTarget = null;
-  events.push(printLine("No public link yet.", "success"));
+  events.push(
+    artLine(
+      createArtBox({
+        title: "ACTION",
+        rows: ["No public link yet."],
+      }),
+      "success"
+    )
+  );
   return events;
 }
 
@@ -1236,11 +1491,20 @@ function buildCommandHelp(commandName) {
     contact: "Examples: `contact`, `preview github`, `open linkedin`",
   };
   return [
-    printLine(`${entry.name} - ${entry.description}`, "success"),
-    printLine(`usage: ${entry.usage}`),
-    printLine(`aliases: ${aliases}`),
-    ...(examples[entry.name] ? [printLine(examples[entry.name])] : []),
-    printLine("Tab completes arguments too.", "success"),
+    artLine(
+      createArtBox({
+        title: `HELP / ${entry.name.toUpperCase()}`,
+        rows: [
+          entry.description,
+          { divider: true },
+          { label: "usage", value: entry.usage },
+          { label: "aliases", value: aliases },
+          ...(examples[entry.name] ? [{ label: "example", value: examples[entry.name].replace(/^Examples:\s*/i, "") }] : []),
+          { label: "input", value: "Tab completes arguments too." },
+        ],
+      }),
+      "success"
+    ),
   ];
 }
 
@@ -1355,34 +1619,55 @@ async function getSessionSnapshot() {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "Unavailable";
 
   return [
-    printLine(`user: ${shellState.user}`, "success"),
-    printLine(`host: ${shellState.host}`),
-    printLine(`public ip: ${geo.ip}`),
-    printLine(`approx location: ${geo.location}`),
-    printLine(`network: ${geo.network}`),
-    printLine(`timezone: ${timezone}`),
-    printLine(`local time: ${localTime}`),
-    printLine(`language: ${languages}`),
-    printLine(`browser: ${userAgent}`),
-    printLine(
-      `screen: ${window.screen.width}x${window.screen.height} @ ${window.devicePixelRatio || 1}x`
+    artLine(
+      createArtBox({
+        title: "SESSION",
+        rows: [
+          { label: "user", value: shellState.user },
+          { label: "host", value: shellState.host },
+          { label: "local time", value: localTime },
+          { label: "timezone", value: timezone },
+          { label: "spinner", value: thinkingSpinnerName },
+          { label: "commands", value: String(sessionStats.commandsExecuted) },
+          { label: "uptime", value: formatDuration(sessionUptime) },
+          { label: "cwd", value: shellState.cwd },
+        ],
+      }),
+      "success"
     ),
-    printLine(`viewport: ${window.innerWidth}x${window.innerHeight}`),
-    printLine(`platform: ${nav.userAgentData?.platform || nav.platform || "Unavailable"}`),
-    printLine(`cpu threads: ${nav.hardwareConcurrency || "Unavailable"}`),
-    printLine(`device memory: ${nav.deviceMemory ? `${nav.deviceMemory} GB` : "Unavailable"}`),
-    printLine(`touch points: ${nav.maxTouchPoints || 0}`),
-    printLine(`cookies: ${nav.cookieEnabled ? "enabled" : "disabled"}`),
-    printLine(`online: ${nav.onLine ? "yes" : "no"}`),
-    printLine(
-      `appearance: ${
-        window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
-      }`
+    artLine(
+      createArtBox({
+        title: "NETWORK",
+        rows: [
+          { label: "public ip", value: geo.ip },
+          { label: "location", value: geo.location },
+          { label: "network", value: geo.network },
+          { label: "online", value: nav.onLine ? "yes" : "no" },
+          { label: "cookies", value: nav.cookieEnabled ? "enabled" : "disabled" },
+          { label: "language", value: languages },
+        ],
+      }),
+      "success"
     ),
-    printLine(`spinner: ${thinkingSpinnerName}`),
-    printLine(`commands this session: ${sessionStats.commandsExecuted}`),
-    printLine(`session uptime: ${formatDuration(sessionUptime)}`),
-    printLine(`cwd: ${shellState.cwd}`),
+    artLine(
+      createArtBox({
+        title: "DEVICE",
+        rows: [
+          { label: "browser", value: userAgent },
+          { label: "platform", value: nav.userAgentData?.platform || nav.platform || "Unavailable" },
+          { label: "screen", value: `${window.screen.width}x${window.screen.height} @ ${window.devicePixelRatio || 1}x` },
+          { label: "viewport", value: `${window.innerWidth}x${window.innerHeight}` },
+          { label: "cpu", value: `${nav.hardwareConcurrency || "Unavailable"} threads` },
+          { label: "memory", value: nav.deviceMemory ? `${nav.deviceMemory} GB` : "Unavailable" },
+          { label: "touch", value: String(nav.maxTouchPoints || 0) },
+          {
+            label: "appearance",
+            value: window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light",
+          },
+        ],
+      }),
+      "success"
+    ),
   ];
 }
 
@@ -2561,8 +2846,54 @@ function printWelcome() {
     second: "2-digit",
     hour12: false,
   });
+  appendHTMLLine(`<pre class="terminal-art terminal-art--hero">${escapeHTML(createWelcomeArt())}</pre>`, "success");
   appendLine(`Last login: ${formatted.replace(",", "")} on ttys000`);
   appendLine("Type 'help' to see available commands.");
+}
+
+function queueBootSequence() {
+  clearPendingTimers();
+  setRunning(true);
+
+  const heroLines = createWelcomeArt().split("\n");
+  const { line, art } = createArtOutputNode("terminal-art--hero");
+  addOutputNode(line);
+
+  let totalDelay = 0;
+
+  heroLines.forEach((heroLine, index) => {
+    scheduleEvent(() => {
+      art.textContent += `${index === 0 ? "" : "\n"}${heroLine}`;
+      scrollToBottom();
+    }, totalDelay);
+    totalDelay += BOOT_STREAM_DELAY;
+  });
+
+  scheduleEvent(() => {
+    startThinkingIndicator("Initializing terminal shell...");
+  }, totalDelay);
+
+  totalDelay += BOOT_INIT_DELAY;
+
+  scheduleEvent(() => {
+    stopThinkingIndicator();
+
+    const now = new Date();
+    const formatted = now.toLocaleString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
+
+    appendLine(`Last login: ${formatted.replace(",", "")} on ttys000`);
+    appendLine("Type 'help' to see available commands.");
+    setRunning(false);
+    saveOutput();
+  }, totalDelay);
 }
 
 function handleFlowArrowKey(event) {
@@ -2593,6 +2924,17 @@ document.addEventListener("keydown", (event) => {
 
 inputEl.addEventListener("keydown", (event) => {
   if (handleFlowArrowKey(event)) {
+    return;
+  }
+
+  if (event.key === "Escape" && mode === "flow") {
+    event.preventDefault();
+    if (isRunning) {
+      interruptRunning();
+    }
+    appendLine("Flow cancelled.", "error");
+    exitFlow();
+    saveOutput();
     return;
   }
 
@@ -2833,7 +3175,7 @@ window.addEventListener("beforeunload", () => {
 
 loadState();
 if (!shellOutputHTML) {
-  printWelcome();
+  queueBootSequence();
 }
 updatePrompt();
 scrollToBottom();

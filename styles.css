@@ -91,16 +91,25 @@ pre {
 }
 
 .terminal__flow {
-  padding: 0 20px 8px;
+  margin: 4px 20px 10px;
+  padding: 0;
   background: var(--bg);
+  box-sizing: border-box;
 }
 
 .terminal__flow[hidden] {
   display: none;
 }
 
-.terminal__flow .flow-step {
+.terminal__flow.flow-step {
   color: var(--success);
+  border: 1px solid rgba(184, 247, 177, 0.14);
+  border-radius: 12px;
+  padding: 12px 14px;
+  box-sizing: border-box;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0)),
+    rgba(255, 255, 255, 0.015);
 }
 
 .terminal__prompt {
@@ -204,9 +213,30 @@ pre {
   color: var(--success);
 }
 
+.terminal-art {
+  margin: 0 0 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0)),
+    rgba(255, 255, 255, 0.018);
+  color: var(--text);
+  line-height: 1.35;
+  overflow-x: auto;
+}
+
+.terminal-art--hero {
+  border-color: rgba(184, 247, 177, 0.16);
+  background:
+    linear-gradient(180deg, rgba(184, 247, 177, 0.05), rgba(255, 255, 255, 0)),
+    rgba(255, 255, 255, 0.02);
+  color: var(--success);
+}
+
 .flow-step__prompt {
   color: var(--success);
-  margin-bottom: 4px;
+  margin-bottom: 8px;
 }
 
 .flow-step__choice {
@@ -215,7 +245,8 @@ pre {
   gap: 10px;
   color: rgba(184, 247, 177, 0.72);
   width: fit-content;
-  margin: 2px 0;
+  margin: 3px 0;
+  transition: transform 120ms ease, background-color 120ms ease, color 120ms ease;
 }
 
 .flow-step__choice.is-selected {
@@ -272,7 +303,7 @@ pre {
   font-family: var(--font-mono);
 }
 
-.output-line pre {
+.output-line pre:not(.terminal-art) {
   background: rgba(255, 255, 255, 0.06);
   padding: 10px 12px;
   border-radius: 6px;
@@ -327,6 +358,10 @@ pre {
 
   .terminal__output {
     padding: 16px 16px 0;
+  }
+
+  .terminal__flow {
+    margin: 4px 16px 10px;
   }
 
   .terminal__input-line {
