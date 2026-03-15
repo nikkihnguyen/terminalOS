@@ -54,6 +54,7 @@ let geoProfilePromise = null;
 let pendingOpenTarget = null;
 let tabState = { value: "", timestamp: 0 };
 let isUserAtBottom = true;
+let shellSlashSelectedIndex = 0;
 let sessionStats = {
   startedAt: Date.now(),
   commandsExecuted: 0,
@@ -183,6 +184,18 @@ const featuredProjectSlugs = [
 const featuredBookmarkSlugs = ["terminal-os", "spline", "cursor", "claude"];
 const FLOW_BACK_VALUE = "back";
 const FLOW_EXIT_VALUE = "exit";
+const SLASH_COMMAND_NAMES = new Set([
+  "help",
+  "preview",
+  "about",
+  "portfolio",
+  "bookmarks",
+  "os",
+  "contact",
+  "tour",
+  "ai",
+  "theme",
+]);
 const CLI_BOX_WIDTH = 68;
 const BOOT_STREAM_DELAY = 42;
 const BOOT_INIT_DELAY = 950;
@@ -200,7 +213,10 @@ const flows = {
         prompt: "Help topic. Use arrows or type.",
         type: "choice",
         choices: () => [
-          ...getUniqueCommandNames().map((value) => ({ label: value, value })),
+          ...getCommandEntries().map((command) => {
+            const value = getCommandDisplayName(command);
+            return { label: value, value };
+          }),
           { label: "exit", value: FLOW_EXIT_VALUE },
         ],
         next: (input) => (input === FLOW_EXIT_VALUE ? "exit" : "show"),
@@ -432,7 +448,7 @@ const flows = {
       },
       "show-about": {
         id: "show-about",
-        prompt: "Type 'about' anytime for the short intro. Want the command list now? (yes/no)",
+        prompt: "Type '/about' anytime for the short intro. Want the command list now? (yes/no)",
         type: "choice",
         choices: [
           { label: "yes", value: "yes" },
@@ -442,7 +458,7 @@ const flows = {
       },
       "show-portfolio": {
         id: "show-portfolio",
-        prompt: "Type 'portfolio' to list projects. Want to keep exploring after that? (yes/no)",
+        prompt: "Type '/portfolio' to list projects. Want to keep exploring after that? (yes/no)",
         type: "choice",
         choices: [
           { label: "yes", value: "yes" },
@@ -452,7 +468,7 @@ const flows = {
       },
       "show-bookmarks": {
         id: "show-bookmarks",
-        prompt: "Type 'bookmarks' to browse saved links. Want to open them now? (yes/no)",
+        prompt: "Type '/bookmarks' to browse saved links. Want to open them now? (yes/no)",
         type: "choice",
         choices: [
           { label: "yes", value: "yes" },
@@ -488,7 +504,7 @@ function createFileSystem() {
                 entries: {
                   "welcome.txt": {
                     type: "file",
-                    content: "welcome to terminalOS\ntry: help, ls, pwd, cat about.txt",
+                    content: "welcome to terminalOS\ntry: /help, ls, pwd, cat about.txt",
                   },
                 },
               },
@@ -505,7 +521,7 @@ function createFileSystem() {
                       "README.txt": {
                         type: "file",
                         content:
-                          "terminalOS\n- a terminal-inspired portfolio sandbox\n- try: portfolio, bookmarks, tour",
+                          "terminalOS\n- a terminal-inspired portfolio sandbox\n- try: /portfolio, /bookmarks, /tour",
                       },
                     },
                   },
@@ -520,7 +536,7 @@ function createFileSystem() {
                     "Previously: Growth at Spline, patient experience at Clearing Health, home financing at Better.com, user growth at Dropbox, and new product work at Atlassian.",
                     "I'm drawn to the intersection of product, storytelling, and creative tech.",
                     "I like shipping experiments, testing creator tools, and vibe-coding small apps with AI.",
-                    "Try: portfolio, bookmarks, contact, ai",
+                    "Try: /portfolio, /bookmarks, /contact, /ai",
                   ].join("\n"),
               },
               "portfolio.txt": {
@@ -690,7 +706,7 @@ const baseCommands = [
     thinkingLabel: "Working...",
     handler: (args) => {
       if (!args.length) {
-        return [printLine("preview: missing target. Usage: preview <target>", "error")];
+        return [printLine("preview: missing target. Usage: /preview <target>", "error")];
       }
       return previewTarget(args.join(" "));
     },
@@ -706,7 +722,7 @@ const baseCommands = [
     handler: (args) => {
       if (!args.length) {
         if (!pendingOpenTarget) {
-          return [printLine("open: no queued link. Try `preview <target>` first.", "error")];
+          return [printLine("open: no queued link. Try `/preview <target>` first.", "error")];
         }
         const { url } = pendingOpenTarget;
         pendingOpenTarget = null;
@@ -841,6 +857,12 @@ const baseCommands = [
 ];
 
 const commandRegistry = buildCommandRegistry(baseCommands);
+const standardCommandRegistry = buildCommandRegistry(
+  baseCommands.filter((command) => !SLASH_COMMAND_NAMES.has(command.name))
+);
+const slashCommandRegistry = buildCommandRegistry(
+  baseCommands.filter((command) => SLASH_COMMAND_NAMES.has(command.name))
+);
 
 function buildCommandRegistry(commands) {
   const registry = new Map();
@@ -849,6 +871,47 @@ function buildCommandRegistry(commands) {
     command.aliases.forEach((alias) => registry.set(alias, command));
   });
   return registry;
+}
+
+function normalizeCommandName(value) {
+  return String(value || "").trim().replace(/^\/+/, "").toLowerCase();
+}
+
+function isSlashOnlyCommandEntry(entry) {
+  return !!entry && SLASH_COMMAND_NAMES.has(entry.name);
+}
+
+function getCommandDisplayName(commandOrName) {
+  const entry =
+    typeof commandOrName === "string"
+      ? commandRegistry.get(normalizeCommandName(commandOrName))
+      : commandOrName;
+  if (!entry) {
+    return String(commandOrName || "");
+  }
+  return `${isSlashOnlyCommandEntry(entry) ? "/" : ""}${entry.name}`;
+}
+
+function getCommandUsage(entry) {
+  if (!entry) return "";
+  return `${isSlashOnlyCommandEntry(entry) ? "/" : ""}${entry.usage}`;
+}
+
+function getCommandAliasesDisplay(entry) {
+  if (!entry || !entry.aliases.length) return "none";
+  return entry.aliases
+    .map((alias) => `${isSlashOnlyCommandEntry(entry) ? "/" : ""}${alias}`)
+    .join(", ");
+}
+
+function getCommandEntries(scope = "all") {
+  const entries = baseCommands.filter((command) => {
+    const isSlash = isSlashOnlyCommandEntry(command);
+    if (scope === "slash") return isSlash;
+    if (scope === "standard") return !isSlash;
+    return true;
+  });
+  return [...entries].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function printLine(text, tone = "") {
@@ -1099,8 +1162,8 @@ function createWelcomeArt() {
       "Nikki Nguyen's terminal portfolio.",
       "Product, experiments, links, and a few playful tools.",
       { divider: true },
-      { label: "surfaces", value: "about · portfolio · bookmarks · contact · os · whoami" },
-      { label: "hint", value: "Use arrows in menus. Tab completes. preview <target> shows detail." },
+      { label: "surfaces", value: "/about · /portfolio · /bookmarks · /contact · /os · whoami" },
+      { label: "hint", value: "Type / for custom commands. Tab completes. /preview <target> shows detail." },
     ],
   });
 }
@@ -1460,7 +1523,7 @@ function openTargetDirectly(target) {
       pendingOpenTarget = null;
       return [openUrl(project.url)];
     }
-    return [printLine(`open: ${target}: no public link yet. Try \`preview ${project.slug}\` for details.`, "error")];
+    return [printLine(`open: ${target}: no public link yet. Try \`/preview ${project.slug}\` for details.`, "error")];
   }
 
   const resolved = resolvePath(target);
@@ -1481,26 +1544,27 @@ function openTargetDirectly(target) {
 }
 
 function buildCommandHelp(commandName) {
-  const entry = commandRegistry.get(commandName);
+  const entry = commandRegistry.get(normalizeCommandName(commandName));
   if (!entry) {
     return [printLine(`help: no help topics match '${commandName}'`, "error")];
   }
-  const aliases = entry.aliases.length ? entry.aliases.join(", ") : "none";
+  const displayName = getCommandDisplayName(entry);
+  const aliases = getCommandAliasesDisplay(entry);
   const examples = {
-    portfolio: "Examples: `portfolio featured`, `portfolio web`, `preview computervision`",
-    bookmarks: "Examples: `bookmarks ai`, `bookmarks work`, `preview cursor`",
-    preview: "Examples: `preview computervision`, `preview github`, `preview about.txt`",
+    portfolio: "Examples: `/portfolio featured`, `/portfolio web`, `/preview computervision`",
+    bookmarks: "Examples: `/bookmarks ai`, `/bookmarks work`, `/preview cursor`",
+    preview: "Examples: `/preview computervision`, `/preview github`, `/preview about.txt`",
     open: "Examples: `open github`, `open computervision`, `open` after a preview",
-    contact: "Examples: `contact`, `preview github`, `open linkedin`",
+    contact: "Examples: `/contact`, `/preview github`, `open linkedin`",
   };
   return [
     artLine(
       createArtBox({
-        title: `HELP / ${entry.name.toUpperCase()}`,
+        title: `HELP ${displayName.toUpperCase()}`,
         rows: [
           entry.description,
           { divider: true },
-          { label: "usage", value: entry.usage },
+          { label: "usage", value: getCommandUsage(entry) },
           { label: "aliases", value: aliases },
           ...(examples[entry.name] ? [{ label: "example", value: examples[entry.name].replace(/^Examples:\s*/i, "") }] : []),
           { label: "input", value: "Tab completes arguments too." },
@@ -1538,8 +1602,36 @@ function levenshteinDistance(a, b) {
 }
 
 function getCommandSuggestions(input) {
+  const normalized = String(input || "").toLowerCase();
+  return getCommandEntries()
+    .map((command) => ({
+      name: getCommandDisplayName(command),
+      distance: levenshteinDistance(normalized, getCommandDisplayName(command).toLowerCase()),
+      startsWith:
+        getCommandDisplayName(command).toLowerCase().startsWith(normalized) ||
+        normalized.startsWith(getCommandDisplayName(command).toLowerCase()),
+      includes:
+        getCommandDisplayName(command).toLowerCase().includes(normalized) ||
+        normalized.includes(getCommandDisplayName(command).toLowerCase()),
+    }))
+    .filter((item) => item.distance <= 3 || item.startsWith || item.includes)
+    .sort((a, b) => {
+      if (a.startsWith !== b.startsWith) return a.startsWith ? -1 : 1;
+      if (a.includes !== b.includes) return a.includes ? -1 : 1;
+      if (a.distance !== b.distance) return a.distance - b.distance;
+      return a.name.localeCompare(b.name);
+    })
+    .slice(0, 3)
+    .map((item) => item.name);
+}
+
+function getScopedCommandSuggestions(input, scope) {
   const normalized = input.toLowerCase();
-  return getUniqueCommandNames()
+  const candidates =
+    scope === "slash"
+      ? getCommandEntries("slash").map((command) => getCommandDisplayName(command))
+      : getUniqueCommandNames("standard");
+  return candidates
     .map((name) => ({
       name,
       distance: levenshteinDistance(normalized, name),
@@ -1857,6 +1949,12 @@ function updateJumpButton() {
   jumpButton.classList.toggle("is-visible", shouldShow);
 }
 
+function clearShellOutput() {
+  outputEl.innerHTML = "";
+  isUserAtBottom = true;
+  updateJumpButton();
+}
+
 function pruneOutputNodes() {
   while (outputEl.childElementCount > MAX_OUTPUT_NODES) {
     const first = outputEl.firstElementChild;
@@ -2075,6 +2173,7 @@ function getCursorOffset() {
 
 function setInputValue(value) {
   inputEl.value = value;
+  shellSlashSelectedIndex = 0;
   tabState = { value: "", timestamp: 0 };
   const end = value.length;
   inputEl.setSelectionRange(end, end);
@@ -2133,8 +2232,12 @@ function pushHistoryEntry(history, value) {
   return history.length;
 }
 
-function getUniqueCommandNames() {
-  return [...new Set(baseCommands.map((command) => command.name))].sort();
+function getUniqueCommandNames(scope = "all") {
+  return getCommandEntries(scope).map((command) => command.name);
+}
+
+function getDisplayCommandNames(scope = "all") {
+  return getCommandEntries(scope).map((command) => getCommandDisplayName(command));
 }
 
 function getPathCompletionCandidates(token, directoriesOnly = false) {
@@ -2156,7 +2259,7 @@ function getPathCompletionCandidates(token, directoriesOnly = false) {
 
 function getCompletionCandidates(command, args, currentToken) {
   if (!command) {
-    return getUniqueCommandNames();
+    return getUniqueCommandNames("standard");
   }
 
   switch (command) {
@@ -2193,7 +2296,7 @@ function getCompletionCandidates(command, args, currentToken) {
     case "help":
     case "man":
       if (args.length > 1) return [];
-      return getUniqueCommandNames();
+      return getDisplayCommandNames();
     default:
       return [];
   }
@@ -2221,6 +2324,172 @@ function getCompletionHint(command) {
     default:
       return "target";
   }
+}
+
+function getShellSlashPaletteCommands(query = "") {
+  const normalized = String(query || "").toLowerCase();
+  return baseCommands.filter((command) => {
+    if (!isSlashOnlyCommandEntry(command)) return false;
+    if (!normalized) return true;
+    return (
+      command.name.startsWith(normalized) ||
+      command.aliases.some((alias) => alias.startsWith(normalized))
+    );
+  });
+}
+
+function getShellSlashPaletteState(rawValue) {
+  const value = String(rawValue || "");
+  if (mode !== "shell" || !value.startsWith("/")) {
+    return {
+      active: false,
+      matches: [],
+      selectedIndex: 0,
+      selectedEntry: null,
+      selectedValue: "",
+      choiceValues: [],
+      prompt: "",
+    };
+  }
+
+  const afterSlash = value.slice(1);
+  if (/\s/.test(afterSlash)) {
+    return {
+      active: false,
+      matches: [],
+      selectedIndex: 0,
+      selectedEntry: null,
+      selectedValue: "",
+      choiceValues: [],
+      prompt: "",
+    };
+  }
+
+  const matches = getShellSlashPaletteCommands(afterSlash.trim());
+  const selectedIndex = matches.length
+    ? Math.min(shellSlashSelectedIndex, matches.length - 1)
+    : 0;
+  const selectedEntry = matches[selectedIndex] || null;
+  const selectedValue = selectedEntry ? getCommandDisplayName(selectedEntry) : "";
+  const prompt = selectedEntry
+    ? `Slash commands. ${selectedValue}: ${selectedEntry.description}  ·  Enter runs  ·  Tab completes.`
+    : "Slash commands. Type to filter custom commands.";
+
+  return {
+    active: true,
+    matches,
+    selectedIndex,
+    selectedEntry,
+    selectedValue,
+    choiceValues: matches.map((entry) => getCommandDisplayName(entry)),
+    prompt,
+  };
+}
+
+function moveShellSlashSelection(delta) {
+  const paletteState = getShellSlashPaletteState(inputEl.value);
+  if (!paletteState.active || !paletteState.matches.length) return false;
+  const count = paletteState.matches.length;
+  shellSlashSelectedIndex = (paletteState.selectedIndex + delta + count) % count;
+  updateInputAssist();
+  return true;
+}
+
+function renderShellSlashMenu(rawValue = inputEl.value) {
+  if (!flowEl) return;
+
+  const paletteState = getShellSlashPaletteState(rawValue);
+  if (!paletteState.active) {
+    if (mode !== "flow") {
+      flowEl.innerHTML = "";
+      flowEl.hidden = true;
+    }
+    return;
+  }
+
+  flowEl.hidden = false;
+  renderFlowStepContent(
+    flowEl,
+    {
+      prompt: paletteState.prompt,
+      type: "choice",
+      choices: paletteState.choiceValues.map((value) => ({ label: value, value })),
+    },
+    {},
+    paletteState.selectedIndex
+  );
+}
+
+function getShellSlashCompletionState(rawValue) {
+  const paletteState = getShellSlashPaletteState(rawValue);
+  if (paletteState.active) {
+    return {
+      matches: paletteState.choiceValues,
+      listMatches: paletteState.choiceValues,
+      bestMatch: paletteState.selectedValue,
+      completedValue: paletteState.selectedValue,
+      helperText: paletteState.selectedEntry
+        ? `${paletteState.selectedValue}: ${paletteState.selectedEntry.description}`
+        : "Type / to browse custom commands.",
+    };
+  }
+
+  const value = String(rawValue || "");
+  const normalizedInput = value.startsWith("/") ? value.slice(1) : value;
+  const endsWithSpace = /\s$/.test(value);
+  const parts = normalizedInput.split(/\s+/).filter(Boolean);
+  const commandToken = parts[0]?.toLowerCase() || "";
+  const entry = slashCommandRegistry.get(commandToken);
+
+  if (!entry) {
+    return {
+      matches: [],
+      listMatches: [],
+      bestMatch: "",
+      completedValue: "",
+      helperText: "Unknown slash command. Type / to browse custom commands.",
+    };
+  }
+
+  const command = entry.name;
+  const args = parts.slice(1);
+  const currentToken = endsWithSpace ? "" : parts[parts.length - 1] || "";
+  const tokenPrefix =
+    value.lastIndexOf(" ") >= 0 ? value.slice(0, value.lastIndexOf(" ") + 1) : "";
+  const candidates = getCompletionCandidates(command, args, currentToken);
+
+  const listMatches = currentToken
+    ? candidates.filter((candidate) =>
+        candidate.toLowerCase().startsWith(currentToken.toLowerCase())
+      )
+    : candidates;
+  const matches = currentToken
+    ? candidates.filter((candidate) =>
+        candidate.toLowerCase().startsWith(currentToken.toLowerCase())
+      )
+    : [];
+  const bestMatch = matches[0] || "";
+
+  let completedValue = "";
+  if (bestMatch) {
+    completedValue = `${tokenPrefix}${bestMatch}`;
+    if (matches.length === 1 && bestMatch === currentToken) {
+      completedValue = `${tokenPrefix}${bestMatch} `;
+    }
+  }
+
+  let helperText = `${getCommandDisplayName(entry)}: ${entry.description}`;
+  if (!currentToken) {
+    helperText = `${getCompletionHint(command)}. Tab twice lists.`;
+  } else if (matches.length === 1) {
+    helperText = `Tab completes to ${bestMatch}`;
+  } else if (matches.length > 1) {
+    helperText = `Tab completes to ${bestMatch}. ${matches.length} matches.`;
+  } else if (currentToken) {
+    helperText = "No autocomplete matches.";
+  }
+
+  return { matches, listMatches, bestMatch, completedValue, helperText };
 }
 
 function findFlowChoiceMatchIndex(rawValue) {
@@ -2312,8 +2581,12 @@ function getCompletionState(rawValue) {
       completedValue: "",
       helperText: pendingOpenTarget
         ? "Queued target ready. Type open."
-        : "Try about, portfolio, bookmarks, contact, or whoami.",
+        : "Type / for custom commands. Try whoami, ls, or /about.",
     };
+  }
+
+  if (value.startsWith("/")) {
+    return getShellSlashCompletionState(value);
   }
 
   const parts = value.split(/\s+/).filter(Boolean);
@@ -2326,7 +2599,7 @@ function getCompletionState(rawValue) {
 
   const candidates =
     isCommandPosition
-      ? getUniqueCommandNames()
+      ? getUniqueCommandNames("standard")
       : getCompletionCandidates(command, args, currentToken);
 
   const listMatches = currentToken
@@ -2393,11 +2666,13 @@ function updateInputAssist() {
   if (!shouldShowGhost) {
     ghostEl.textContent = "";
     ghostEl.style.transform = "translateX(0)";
+    renderShellSlashMenu();
     return;
   }
 
   ghostEl.textContent = suffix;
   ghostEl.style.transform = `translateX(${getCursorOffset()}px)`;
+  renderShellSlashMenu();
 }
 
 function setRunning(next) {
@@ -2529,15 +2804,43 @@ function runCommand(input) {
   appendCommandEcho(trimmed);
   recordCommand(trimmed);
 
-  const { command, args } = parseInput(trimmed);
-  const entry = commandRegistry.get(command);
+  const isSlashCommand = trimmed.startsWith("/");
+  const normalizedInput = isSlashCommand ? trimmed.slice(1).trim() : trimmed;
+  const { command, args } = parseInput(normalizedInput);
+  const entry = isSlashCommand
+    ? slashCommandRegistry.get(command)
+    : standardCommandRegistry.get(command);
   if (!entry) {
-    const suggestions = getCommandSuggestions(command);
-    const events = [printLine(`zsh: command not found: ${command}`, "error")];
-    if (suggestions.length > 0) {
-      events.push(printLine(`Did you mean: ${suggestions.join(", ")}?`, "success"));
+    const events = [printLine(`zsh: command not found: ${trimmed.split(/\s+/)[0]}`, "error")];
+
+    if (!isSlashCommand) {
+      const slashEntry = slashCommandRegistry.get(command);
+      if (slashEntry) {
+        events.push(
+          printLine(`Use ${getCommandDisplayName(slashEntry)} or type / for custom commands.`, "success")
+        );
+      } else {
+        const suggestions = getScopedCommandSuggestions(command, "standard");
+        if (suggestions.length > 0) {
+          events.push(printLine(`Did you mean: ${suggestions.join(", ")}?`, "success"));
+        } else {
+          events.push(printLine("Try: /help", "success"));
+        }
+      }
     } else {
-      events.push(printLine("Try: help", "success"));
+      const standardEntry = standardCommandRegistry.get(command);
+      if (standardEntry) {
+        events.push(
+          printLine(`Use ${getCommandDisplayName(standardEntry)} without /.`, "success")
+        );
+      } else {
+        const suggestions = getScopedCommandSuggestions(trimmed.split(/\s+/)[0], "slash");
+        if (suggestions.length > 0) {
+          events.push(printLine(`Did you mean: ${suggestions.join(", ")}?`, "success"));
+        } else {
+          events.push(printLine("Type / to browse custom commands.", "success"));
+        }
+      }
     }
     queueEvents(events, {
       initialDelay: DEFAULT_COMMAND_DELAY,
@@ -2766,7 +3069,8 @@ function handleFlowInput(input) {
   printFlowStep();
 }
 
-function exitFlow() {
+function exitFlow(options = {}) {
+  const { announceReturn = true } = options;
   mode = "shell";
   currentFlow = null;
   flowState = null;
@@ -2776,7 +3080,9 @@ function exitFlow() {
     flowEl.hidden = true;
   }
   updatePrompt();
-  appendLine("Returned to shell.", "success");
+  if (announceReturn) {
+    appendLine("Returned to shell.", "success");
+  }
   saveOutput();
   focusInput();
 }
@@ -2827,19 +3133,19 @@ function handleAIInput(input) {
 function generateAIReply(input) {
   const lower = input.toLowerCase();
   if (lower.includes("portfolio")) {
-    return "Try `portfolio` to list projects from the desktop OS portfolio, then `open <slug>` for details.";
+    return "Try `/portfolio` to list projects from the desktop OS portfolio, then `open <slug>` for details.";
   }
   if (lower.includes("bookmark") || lower.includes("tool")) {
-    return "Use `bookmarks` to browse Nikki's saved links and tools, then `preview <bookmark>` or `open <bookmark>`.";
+    return "Use `/bookmarks` to browse Nikki's saved links and tools, then `/preview <bookmark>` or `open <bookmark>`.";
   }
   if (lower.includes("contact") || lower.includes("email")) {
-    return "Use `contact` for Nikki's email and social links.";
+    return "Use `/contact` for Nikki's email and social links.";
   }
   if (lower.includes("work") || lower.includes("experience")) {
     return "Nikki is currently a Product Manager at EliseAI, after roles at Spline, Clearing Health, Better.com, Dropbox, and Atlassian.";
   }
   if (lower.includes("help")) {
-    return "Type `help` for the command list. I can guide you too.";
+    return "Type `/help` for the command list. I can guide you too.";
   }
   return "Ask about Nikki's work, portfolio, bookmarks, or contact links.";
 }
@@ -2957,6 +3263,7 @@ function loadState() {
   shellHistoryIndex = 0;
   aiHistory = [];
   aiHistoryIndex = 0;
+  shellSlashSelectedIndex = 0;
   outputEl.innerHTML = "";
 
   if (storedTheme) {
@@ -2977,7 +3284,7 @@ function appendReadyLines() {
     hour12: false,
   });
   appendLine(`Last login: ${formatted.replace(",", "")} on ttys000`);
-  appendLine("Type 'help' to see available commands.");
+  appendLine("Type '/help' to see available commands.");
 }
 
 function printWelcome() {
@@ -2998,6 +3305,7 @@ function resetInteractiveState() {
   shellHistoryIndex = 0;
   aiHistory = [];
   aiHistoryIndex = 0;
+  shellSlashSelectedIndex = 0;
   tabState = { value: "", timestamp: 0 };
   inputEl.value = "";
   ghostEl.textContent = "";
@@ -3103,8 +3411,8 @@ inputEl.addEventListener("keydown", (event) => {
     if (isRunning) {
       interruptRunning();
     }
-    appendLine("Flow cancelled.", "error");
-    exitFlow();
+    exitFlow({ announceReturn: false });
+    setInputValue("");
     saveOutput();
     return;
   }
@@ -3131,9 +3439,7 @@ inputEl.addEventListener("keydown", (event) => {
     }
     if (key === "l") {
       event.preventDefault();
-      outputEl.innerHTML = "";
-      isUserAtBottom = true;
-      updateJumpButton();
+      clearShellOutput();
       saveOutput();
       return;
     }
@@ -3166,11 +3472,17 @@ inputEl.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
     if (isRunning) return;
-    const value =
-      mode === "flow" && !inputEl.value.trim()
-        ? getSelectedFlowChoiceValue()
-        : inputEl.value;
+    let value = inputEl.value;
+    if (mode === "flow" && !inputEl.value.trim()) {
+      value = getSelectedFlowChoiceValue();
+    } else if (mode === "shell") {
+      const paletteState = getShellSlashPaletteState(inputEl.value);
+      if (paletteState.active && paletteState.selectedValue) {
+        value = paletteState.selectedValue;
+      }
+    }
     inputEl.value = "";
+    shellSlashSelectedIndex = 0;
     updateCaret();
 
     if (mode === "shell") {
@@ -3207,6 +3519,10 @@ inputEl.addEventListener("keydown", (event) => {
       event.preventDefault();
       return;
     }
+    if (mode === "shell" && moveShellSlashSelection(-1)) {
+      event.preventDefault();
+      return;
+    }
     event.preventDefault();
     const history = mode === "ai" ? aiHistory : shellHistory;
     if (history.length === 0) return;
@@ -3221,6 +3537,10 @@ inputEl.addEventListener("keydown", (event) => {
 
   if (event.key === "ArrowDown") {
     if (mode === "flow" && moveFlowSelection(1)) {
+      event.preventDefault();
+      return;
+    }
+    if (mode === "shell" && moveShellSlashSelection(1)) {
       event.preventDefault();
       return;
     }
@@ -3254,6 +3574,16 @@ inputEl.addEventListener("keydown", (event) => {
     event.preventDefault();
     if (isRunning) return;
     const rawValue = inputEl.value;
+    if (mode === "shell") {
+      const paletteState = getShellSlashPaletteState(rawValue);
+      if (paletteState.active) {
+        if (paletteState.selectedValue) {
+          setInputValue(`${paletteState.selectedValue} `);
+          shellSlashSelectedIndex = 0;
+        }
+        return;
+      }
+    }
     if (mode === "flow" && !rawValue.trim()) {
       moveFlowSelection(1);
       return;
@@ -3279,6 +3609,7 @@ inputEl.addEventListener("keydown", (event) => {
 
 inputEl.addEventListener("input", () => {
   tabState = { value: "", timestamp: 0 };
+  shellSlashSelectedIndex = 0;
   if (mode === "flow") {
     const matchIndex = findFlowChoiceMatchIndex(inputEl.value);
     if (matchIndex >= 0) {
