@@ -48,6 +48,7 @@ let activeFlowStepNode = null;
 let isRunning = false;
 let pendingTimers = new Set();
 let activeSpinner = null;
+let activeOutputCapture = null;
 let activeAsyncCommandToken = 0;
 let geoProfilePromise = null;
 let pendingOpenTarget = null;
@@ -185,6 +186,8 @@ const FLOW_EXIT_VALUE = "exit";
 const CLI_BOX_WIDTH = 68;
 const BOOT_STREAM_DELAY = 42;
 const BOOT_INIT_DELAY = 950;
+const MAX_OUTPUT_NODES = 220;
+const GEO_FETCH_TIMEOUT_MS = 2500;
 
 const flows = {
   "help-picker": {
@@ -1566,39 +1569,92 @@ function formatDuration(ms) {
 
 function getApproxLocationLabel(locationData) {
   if (!locationData) return "Unavailable";
-  const parts = [locationData.city, locationData.region, locationData.country_name]
+  const parts = [
+    locationData.city,
+    locationData.region,
+    locationData.country_name || locationData.country,
+  ]
     .filter(Boolean);
   return parts.length ? parts.join(", ") : "Unavailable";
+}
+
+async function fetchJsonWithTimeout(url) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), GEO_FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      mode: "cors",
+      cache: "no-store",
+      credentials: "omit",
+      referrerPolicy: "no-referrer",
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      throw new Error(`request failed: ${response.status}`);
+    }
+    return await response.json();
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 }
 
 async function getGeoProfile() {
   if (!geoProfilePromise) {
     geoProfilePromise = (async () => {
+      const emptyProfile = {
+        ip: "Unavailable",
+        location: "Unavailable",
+        network: "Unavailable",
+        postal: "Unavailable",
+        timezone: "Unavailable",
+      };
+
       try {
-        const response = await fetch("https://ipapi.co/json/");
-        if (!response.ok) {
-          throw new Error(`ip lookup failed: ${response.status}`);
+        const primary = await fetchJsonWithTimeout("https://ipwho.is/");
+        if (primary?.success !== false) {
+          return {
+            ip: primary.ip || "Unavailable",
+            location: getApproxLocationLabel(primary),
+            network: primary.connection?.org || primary.connection?.isp || "Unavailable",
+            postal: primary.postal || "Unavailable",
+            timezone: primary.timezone?.id || "Unavailable",
+          };
         }
-        const data = await response.json();
+      } catch (error) {
+        // Fall through to the next provider.
+      }
+
+      try {
+        const secondary = await fetchJsonWithTimeout("https://ipapi.co/json/");
         return {
-          ip: data.ip || "Unavailable",
-          location: getApproxLocationLabel(data),
-          network: data.org || data.asn || "Unavailable",
-          postal: data.postal || "Unavailable",
-          timezone: data.timezone || "Unavailable",
+          ip: secondary.ip || "Unavailable",
+          location: getApproxLocationLabel(secondary),
+          network: secondary.org || secondary.asn || "Unavailable",
+          postal: secondary.postal || "Unavailable",
+          timezone: secondary.timezone || "Unavailable",
         };
       } catch (error) {
+        // Fall through to the last provider.
+      }
+
+      try {
+        const tertiary = await fetchJsonWithTimeout("https://api.ipify.org?format=json");
         return {
-          ip: "Unavailable",
-          location: "Unavailable",
-          network: "Unavailable",
-          postal: "Unavailable",
-          timezone: "Unavailable",
+          ...emptyProfile,
+          ip: tertiary.ip || "Unavailable",
         };
+      } catch (error) {
+        return emptyProfile;
       }
     })();
   }
-  return geoProfilePromise;
+
+  const profile = await geoProfilePromise;
+  if (profile.ip === "Unavailable" && profile.location === "Unavailable") {
+    geoProfilePromise = null;
+  }
+  return profile;
 }
 
 async function getSessionSnapshot() {
@@ -1801,9 +1857,73 @@ function updateJumpButton() {
   jumpButton.classList.toggle("is-visible", shouldShow);
 }
 
+function pruneOutputNodes() {
+  while (outputEl.childElementCount > MAX_OUTPUT_NODES) {
+    const first = outputEl.firstElementChild;
+    if (!first) break;
+
+    const next = first.nextElementSibling;
+    if (activeOutputCapture) {
+      if (activeOutputCapture.start === first) {
+        activeOutputCapture.start = next;
+      }
+      if (activeOutputCapture.end === first) {
+        activeOutputCapture.end = next;
+      }
+    }
+
+    first.remove();
+  }
+}
+
+function beginOutputCapture() {
+  activeOutputCapture = {
+    start: null,
+    end: null,
+  };
+}
+
+function captureOutputNode(node) {
+  if (!activeOutputCapture || !node || node.parentElement !== outputEl) return;
+  if (node.classList?.contains("output-line--spinner")) return;
+  if (!activeOutputCapture.start) {
+    activeOutputCapture.start = node;
+  }
+  activeOutputCapture.end = node;
+}
+
+function revealOutputRange(startNode, endNode = startNode) {
+  if (!startNode || !endNode) return;
+  if (startNode.parentElement !== outputEl || endNode.parentElement !== outputEl) return;
+
+  const padding = 12;
+  const top = Math.max(0, startNode.offsetTop - padding);
+  const bottom = endNode.offsetTop + endNode.offsetHeight + padding;
+  const viewportHeight = outputEl.clientHeight;
+  const maxScrollTop = Math.max(0, outputEl.scrollHeight - viewportHeight);
+  let nextScrollTop = top;
+
+  if (bottom - top <= viewportHeight) {
+    nextScrollTop = Math.max(0, Math.min(top, bottom - viewportHeight));
+  }
+
+  outputEl.scrollTop = Math.min(nextScrollTop, maxScrollTop);
+  isUserAtBottom = isScrolledToBottom();
+  updateJumpButton();
+}
+
+function finishOutputCapture() {
+  if (!activeOutputCapture) return;
+  const { start, end } = activeOutputCapture;
+  activeOutputCapture = null;
+  revealOutputRange(start, end);
+}
+
 function addOutputNode(node) {
   const wasAtBottom = isScrolledToBottom();
   outputEl.appendChild(node);
+  captureOutputNode(node);
+  pruneOutputNodes();
   if (wasAtBottom) {
     scrollToBottom();
   } else {
@@ -2003,6 +2123,14 @@ function getDirectoryCompletionEntries(path) {
       name,
       node: node.entries[name],
     }));
+}
+
+function pushHistoryEntry(history, value) {
+  history.push(value);
+  if (history.length > settings.maxHistory) {
+    history.splice(0, history.length - settings.maxHistory);
+  }
+  return history.length;
 }
 
 function getUniqueCommandNames() {
@@ -2303,6 +2431,9 @@ function scheduleEvent(callback, delay) {
 
 function queueEvents(events, options = {}) {
   const queuedEvents = Array.isArray(events) ? events : [];
+  const takesOver = queuedEvents.some(
+    (event) => event?.type === "clear" || event?.type === "reset"
+  );
   const initialDelay =
     typeof options.initialDelay === "number" ? options.initialDelay : 0;
   const stepDelay =
@@ -2320,13 +2451,16 @@ function queueEvents(events, options = {}) {
     }, totalDelay);
     totalDelay += stepDelay;
   });
-  scheduleEvent(() => {
-    if (showThinking) {
-      stopThinkingIndicator();
-    }
-    setRunning(false);
-    saveOutput();
-  }, totalDelay);
+  if (!takesOver) {
+    scheduleEvent(() => {
+      if (showThinking) {
+        stopThinkingIndicator();
+      }
+      setRunning(false);
+      finishOutputCapture();
+      saveOutput();
+    }, totalDelay);
+  }
 }
 
 async function queueAsyncEvents(eventsPromise, options = {}) {
@@ -2381,6 +2515,7 @@ function queueFlowSubmission(value) {
     if (mode === "flow") {
       focusInput();
     }
+    finishOutputCapture();
     saveOutput();
   }, FLOW_COMMAND_DELAY);
 }
@@ -2390,6 +2525,7 @@ function runCommand(input) {
   if (!trimmed) return;
   if (isRunning) return;
 
+  beginOutputCapture();
   appendCommandEcho(trimmed);
   recordCommand(trimmed);
 
@@ -2446,20 +2582,10 @@ function renderEvent(event) {
       appendPanel(event.title, event.content);
       break;
     case "clear":
-      outputEl.innerHTML = "";
-      pendingOpenTarget = null;
-      isUserAtBottom = true;
-      updateJumpButton();
+      softRebootTerminal();
       break;
     case "reset":
-      outputEl.innerHTML = "";
-      pendingOpenTarget = null;
-      shellState.cwd = shellState.home;
-      mode = "shell";
-      updatePrompt();
-      updateTitle();
-      isUserAtBottom = true;
-      updateJumpButton();
+      softRebootTerminal();
       break;
     case "openUrl":
       window.open(event.url, "_blank", "noopener,noreferrer");
@@ -2839,7 +2965,7 @@ function loadState() {
   loadStats();
 }
 
-function printWelcome() {
+function appendReadyLines() {
   const now = new Date();
   const formatted = now.toLocaleString("en-US", {
     weekday: "short",
@@ -2850,14 +2976,67 @@ function printWelcome() {
     second: "2-digit",
     hour12: false,
   });
-  appendHTMLLine(`<pre class="terminal-art terminal-art--hero">${escapeHTML(createWelcomeArt())}</pre>`, "success");
   appendLine(`Last login: ${formatted.replace(",", "")} on ttys000`);
   appendLine("Type 'help' to see available commands.");
+}
+
+function printWelcome() {
+  appendHTMLLine(`<pre class="terminal-art terminal-art--hero">${escapeHTML(createWelcomeArt())}</pre>`, "success");
+  appendReadyLines();
+}
+
+function resetInteractiveState() {
+  pendingOpenTarget = null;
+  shellState.cwd = shellState.home;
+  mode = "shell";
+  currentFlow = null;
+  flowState = null;
+  activeFlowStepNode = null;
+  shellOutputHTML = "";
+  aiOutputHTML = "";
+  shellHistory = [];
+  shellHistoryIndex = 0;
+  aiHistory = [];
+  aiHistoryIndex = 0;
+  tabState = { value: "", timestamp: 0 };
+  inputEl.value = "";
+  ghostEl.textContent = "";
+  if (flowEl) {
+    flowEl.innerHTML = "";
+    flowEl.hidden = true;
+  }
+  clearPersistedHistory();
+  updatePrompt();
+  updateTitle();
+  isUserAtBottom = true;
+  updateJumpButton();
+}
+
+function queueShellInitialization() {
+  beginOutputCapture();
+  startThinkingIndicator("Initializing terminal shell...");
+  scheduleEvent(() => {
+    stopThinkingIndicator();
+    appendReadyLines();
+    setRunning(false);
+    finishOutputCapture();
+    saveOutput();
+  }, BOOT_INIT_DELAY);
+}
+
+function softRebootTerminal() {
+  activeAsyncCommandToken += 1;
+  clearPendingTimers();
+  setRunning(true);
+  outputEl.innerHTML = "";
+  resetInteractiveState();
+  queueShellInitialization();
 }
 
 function queueBootSequence() {
   clearPendingTimers();
   setRunning(true);
+  beginOutputCapture();
 
   const heroLines = createWelcomeArt().split("\n");
   const { line, art } = createArtOutputNode("terminal-art--hero");
@@ -2881,21 +3060,9 @@ function queueBootSequence() {
 
   scheduleEvent(() => {
     stopThinkingIndicator();
-
-    const now = new Date();
-    const formatted = now.toLocaleString("en-US", {
-      weekday: "short",
-      month: "short",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-    });
-
-    appendLine(`Last login: ${formatted.replace(",", "")} on ttys000`);
-    appendLine("Type 'help' to see available commands.");
+    appendReadyLines();
     setRunning(false);
+    finishOutputCapture();
     saveOutput();
   }, totalDelay);
 }
@@ -3008,8 +3175,7 @@ inputEl.addEventListener("keydown", (event) => {
 
     if (mode === "shell") {
       if (value.trim()) {
-        shellHistory.push(value.trim());
-        shellHistoryIndex = shellHistory.length;
+        shellHistoryIndex = pushHistoryEntry(shellHistory, value.trim());
         runCommand(value);
       } else {
         appendCommandEcho("");
@@ -3020,6 +3186,7 @@ inputEl.addEventListener("keydown", (event) => {
     }
 
     if (mode === "flow") {
+      beginOutputCapture();
       appendCommandEcho(value);
       queueFlowSubmission(value);
       return;
@@ -3027,8 +3194,7 @@ inputEl.addEventListener("keydown", (event) => {
 
     if (mode === "ai") {
       if (value.trim()) {
-        aiHistory.push(value.trim());
-        aiHistoryIndex = aiHistory.length;
+        aiHistoryIndex = pushHistoryEntry(aiHistory, value.trim());
       }
       appendCommandEcho(value);
       handleAIInput(value);

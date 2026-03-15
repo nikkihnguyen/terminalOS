@@ -87,6 +87,12 @@ pre {
   background: transparent;
   font-size: 14px;
   cursor: text;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.terminal__output::-webkit-scrollbar {
+  display: none;
 }
 
 .terminal__input-line {
