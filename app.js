@@ -9,6 +9,8 @@ const terminalEl = document.getElementById("terminal");
 const caretEl = document.getElementById("terminal-caret");
 const measureEl = document.getElementById("terminal-measure");
 const inputWrapEl = document.querySelector(".terminal__input-wrap");
+const ghostEl = document.getElementById("terminal-ghost");
+const helperEl = document.getElementById("terminal-helper");
 
 const STORAGE_KEYS = {
   shellOutput: "terminalos.shell.output",
@@ -43,6 +45,9 @@ let flowState = null;
 let isRunning = false;
 let pendingTimers = new Set();
 let activeSpinner = null;
+let activeAsyncCommandToken = 0;
+let geoProfilePromise = null;
+let pendingOpenTarget = null;
 let tabState = { value: "", timestamp: 0 };
 let isUserAtBottom = true;
 let sessionStats = {
@@ -54,40 +59,67 @@ let sessionStats = {
 
 const projectData = [
   {
-    slug: "terminal-sandbox",
-    name: "Terminal Sandbox",
-    summary: "Terminal-first personal site with command routing and flows.",
-    tech: "Vanilla JS, HTML, CSS",
-    highlights: ["Command registry", "Flow engine", "AI mode stub"],
+    slug: "computer-vision",
+    name: "Computer Vision",
+    summary: "Experimental computer vision project featured in the desktop OS portfolio.",
+    tech: "Computer vision, browser experiment",
+    highlights: ["Interactive demo", "Visual exploration", "Personal experiment"],
+    url: "https://nikkihnguyen.com/computer-vision",
   },
   {
-    slug: "signal-lab",
-    name: "Signal Lab",
-    summary: "Interactive data stories built with a terminal-inspired UI.",
-    tech: "D3.js, TypeScript",
-    highlights: ["Dynamic charts", "Narrative flow", "Accessible visuals"],
+    slug: "shader-toy",
+    name: "Shader Toy",
+    summary: "Shader-based visual playground linked from the desktop OS portfolio.",
+    tech: "Shaders, graphics, browser experiment",
+    highlights: ["Realtime visuals", "Creative coding", "Graphics exploration"],
+    url: "https://nikkihnguyen.com/shader-toy/dist",
   },
   {
-    slug: "ops-console",
-    name: "Ops Console",
-    summary: "Operational dashboard that feels like a mission control.",
-    tech: "React, Node",
-    highlights: ["Real-time status", "Custom alerts", "Role-based views"],
+    slug: "trading-dashboard",
+    name: "Trading Dashboard",
+    summary: "Market-focused dashboard prototype linked from the desktop OS portfolio.",
+    tech: "Dashboard UI, finance tooling, browser app",
+    highlights: ["Trading view", "Data-rich layout", "Experimental product work"],
+    url: "https://nikkihnguyen.com/trader-dashboard",
   },
 ];
 
-const appsData = [
+const bookmarksData = [
   {
-    slug: "demo-hub",
-    name: "Demo Hub",
-    description: "Curated playground of interactive prototypes.",
-    url: "https://example.com",
+    slug: "spline",
+    name: "Spline",
+    description: "Collaborative 3D design tool Nikki previously helped grow.",
+    url: "https://spline.design",
   },
   {
-    slug: "ai-sandbox",
-    name: "AI Sandbox",
-    description: "Experimental AI workflows in the browser.",
-    url: "https://example.com/ai",
+    slug: "perplexity",
+    name: "Perplexity",
+    description: "One of the AI tools listed in Nikki's bookmarks.",
+    url: "https://www.perplexity.ai/",
+  },
+  {
+    slug: "claude",
+    name: "Claude",
+    description: "AI assistant bookmark from the desktop OS page.",
+    url: "https://claude.ai/",
+  },
+  {
+    slug: "cursor",
+    name: "Cursor",
+    description: "AI coding tool listed in Nikki's bookmarks.",
+    url: "https://www.cursor.com/",
+  },
+  {
+    slug: "bolt",
+    name: "Bolt",
+    description: "Fast browser app builder from the bookmarks list.",
+    url: "https://bolt.new/",
+  },
+  {
+    slug: "terminal-os",
+    name: "Terminal OS",
+    description: "Nikki's desktop-style personal OS experiment.",
+    url: "https://nikkihnguyen.com/os/",
   },
 ];
 
@@ -109,12 +141,12 @@ const flows = {
       },
       focus: {
         id: "focus",
-        prompt: "What do you want to explore? (about/portfolio/apps)",
+        prompt: "What do you want to explore? (about/portfolio/bookmarks)",
         type: "choice",
         choices: [
           { label: "about", value: "about" },
           { label: "portfolio", value: "portfolio" },
-          { label: "apps", value: "apps" },
+          { label: "bookmarks", value: "bookmarks" },
         ],
         next: (input) => `show-${input}`,
       },
@@ -130,7 +162,7 @@ const flows = {
       },
       "show-portfolio": {
         id: "show-portfolio",
-        prompt: "Type 'portfolio' to list projects. Want a quick resume link too? (yes/no)",
+        prompt: "Type 'portfolio' to list projects. Want to keep exploring after that? (yes/no)",
         type: "choice",
         choices: [
           { label: "yes", value: "yes" },
@@ -138,9 +170,9 @@ const flows = {
         ],
         next: () => "closing",
       },
-      "show-apps": {
-        id: "show-apps",
-        prompt: "Type 'apps' to see demos, then 'launch <app>'. Want to open apps now? (yes/no)",
+      "show-bookmarks": {
+        id: "show-bookmarks",
+        prompt: "Type 'bookmarks' to see saved links, then 'launch <bookmark>'. Want to open them now? (yes/no)",
         type: "choice",
         choices: [
           { label: "yes", value: "yes" },
@@ -153,7 +185,6 @@ const flows = {
         prompt: "Tour complete. Ready to explore? (yes to exit)",
         type: "choice",
         choices: [{ label: "yes", value: "yes" }],
-        links: [{ text: "Open resume PDF", url: "resume.pdf" }],
         next: () => "end",
       },
     },
@@ -183,14 +214,7 @@ function createFileSystem() {
               },
               Documents: {
                 type: "dir",
-                entries: {
-                  "resume.pdf": {
-                    type: "file",
-                    content: "binary file",
-                    openUrl: "resume.pdf",
-                    binary: true,
-                  },
-                },
+                entries: {},
               },
               Projects: {
                 type: "dir",
@@ -201,7 +225,7 @@ function createFileSystem() {
                       "README.txt": {
                         type: "file",
                         content:
-                          "terminalOS\n- a terminal-inspired portfolio sandbox\n- try: portfolio, apps, tour",
+                          "terminalOS\n- a terminal-inspired portfolio sandbox\n- try: portfolio, bookmarks, tour",
                       },
                     },
                   },
@@ -210,13 +234,14 @@ function createFileSystem() {
               "about.txt": {
                 type: "file",
                 content: () =>
-                  "Hi, I'm Nikki Nguyen. This is a terminal-style sandbox for my work.\nTry: portfolio, apps, tour, ai",
-              },
-              "resume.pdf": {
-                type: "file",
-                content: "binary file",
-                openUrl: "resume.pdf",
-                binary: true,
+                  [
+                    "Hi there - I'm Nikki, a product manager based in NYC.",
+                    "I'm currently a Product Manager at EliseAI.",
+                    "Previously: Growth at Spline, patient experience at Clearing Health, home financing at Better.com, user growth at Dropbox, and new product work at Atlassian.",
+                    "I'm drawn to the intersection of product, storytelling, and creative tech.",
+                    "I like shipping experiments, testing creator tools, and vibe-coding small apps with AI.",
+                    "Try: portfolio, bookmarks, contact, ai",
+                  ].join("\n"),
               },
               "portfolio.txt": {
                 type: "file",
@@ -229,12 +254,12 @@ function createFileSystem() {
                     ),
                   ].join("\n"),
               },
-              "apps.txt": {
+              "bookmarks.txt": {
                 type: "file",
                 content: () =>
                   [
-                    "Apps:",
-                    ...appsData.map(
+                    "Bookmarks:",
+                    ...bookmarksData.map(
                       (app) => `- ${app.name} (${app.slug}): ${app.description}`
                     ),
                   ].join("\n"),
@@ -242,7 +267,7 @@ function createFileSystem() {
               "links.txt": {
                 type: "file",
                 content:
-                  "Resume: resume.pdf\nEmail: mailto:hello@example.com\nLinkedIn: https://linkedin.com\nGitHub: https://github.com",
+                  "Website: https://nikkihnguyen.com/\nTerminal OS: https://nikkihnguyen.com/os/\nEmail: mailto:nikki.nguyen8@gmail.com\nLinkedIn: https://linkedin.com/in/nikkinguyen8/\nGitHub: https://github.com/nikkihnguyen\nTwitter: https://twitter.com/nikkihnguyen\nInstagram: https://instagram.com/nikkihnguyen/",
               },
             },
           },
@@ -257,10 +282,10 @@ const spinnerNames = Object.keys(spinnerLibrary).filter((name) => {
   const spinner = spinnerLibrary[name];
   return spinner && Array.isArray(spinner.frames) && spinner.frames.length > 0;
 });
+const thinkingSpinnerName =
+  spinnerNames[Math.floor(Math.random() * spinnerNames.length)] || "braille";
 const thinkingSpinner =
-  spinnerLibrary[
-    spinnerNames[Math.floor(Math.random() * spinnerNames.length)] || "braille"
-  ] ||
+  spinnerLibrary[thinkingSpinnerName] ||
   spinnerLibrary.braille ||
   spinnerLibrary.helix;
 const DEFAULT_COMMAND_DELAY = 520;
@@ -285,6 +310,7 @@ const baseCommands = [
         }
       });
       events.push(printLine("Try: man <command>", "success"));
+      events.push(printLine("Press Tab to autocomplete. Double-Tab lists matches.", "success"));
       return events;
     },
   },
@@ -305,14 +331,19 @@ const baseCommands = [
     aliases: [],
     description: "Print working directory.",
     usage: "pwd",
-    handler: () => [printLine(shellState.cwd)],
+    handler: () => [printLine(shellState.cwd), printLine("Use: ls to inspect this directory.", "success")],
   },
   {
     name: "whoami",
     aliases: [],
-    description: "Print current user.",
+    description: "Inspect the current session.",
     usage: "whoami",
-    handler: () => [printLine(shellState.user)],
+    thinkingLabel: "Profiling session...",
+    handler: async () => {
+      const events = await getSessionSnapshot();
+      events.push(printLine("Try: contact, portfolio, or bookmarks next.", "success"));
+      return events;
+    },
   },
   {
     name: "ls",
@@ -330,9 +361,12 @@ const baseCommands = [
         return [printLine(`ls: ${target}: No such file or directory`, "error")];
       }
       if (node.type !== "dir") {
-        return [printLine(target)];
+        return [printLine(target), printLine("Use: open <target> to inspect or queue it.", "success")];
       }
-      return [htmlLine(formatDirectoryListing(node.entries || {}))];
+      return [
+        htmlLine(formatDirectoryListing(node.entries || {})),
+        printLine("Use: cd <dir>, cat <file>, or open <target>.", "success"),
+      ];
     },
   },
   {
@@ -380,34 +414,37 @@ const baseCommands = [
       if (node.binary) {
         return [printLine(`cat: ${target}: Binary file`, "error")];
       }
-      return [printLine(getFileContent(node))];
+      return [printLine(getFileContent(node)), printLine("Use: open <target> if this file maps to a link.", "success")];
     },
   },
   {
     name: "open",
     aliases: [],
-    description: "Open a file, url, or app.",
-    usage: "open <file|url|app>",
+    description: "Queue a link to open, or open the queued link.",
+    usage: "open [file|url|project|bookmark]",
     runDelay: 150,
     stepDelay: 20,
     thinkingLabel: "Working...",
     handler: (args) => {
       if (!args.length) {
-        return [printLine("open: missing operand", "error")];
+        if (!pendingOpenTarget) {
+          return [printLine("open: no queued link. Try `open <target>` first.", "error")];
+        }
+        const { url } = pendingOpenTarget;
+        pendingOpenTarget = null;
+        return [openUrl(url)];
       }
       const target = args.join(" ");
-      const normalized = target.toLowerCase();
-      if (normalized === "resume") {
-        return [openUrl("resume.pdf")];
-      }
       const url = normalizeUrl(target);
       if (url) {
-        return [openUrl(url)];
+        return queueOpenTarget(`URL: ${url}`, url, [
+          printLine(`URL: ${url}`),
+        ]);
       }
 
       const app = findApp(target);
       if (app) {
-        return [openUrl(app.url)];
+        return describeBookmark(app);
       }
 
       const project = findProject(target);
@@ -419,10 +456,16 @@ const baseCommands = [
       const node = getNode(resolved);
       if (node && node.type === "file") {
         if (node.openUrl) {
-          return [openUrl(node.openUrl)];
+          return queueOpenTarget(target, node.openUrl, [
+            printLine(`File: ${target}`, "success"),
+            printLine(`Open: ${node.openUrl}`),
+          ]);
         }
         if (isOpenableFile(target)) {
-          return [openUrl(target)];
+          return queueOpenTarget(target, target, [
+            printLine(`File: ${target}`, "success"),
+            printLine(`Open: ${target}`),
+          ]);
         }
         return [printLine(`open: ${target}: not a supported file type`, "error")];
       }
@@ -449,8 +492,11 @@ const baseCommands = [
     description: "Short intro and suggested next steps.",
     usage: "about",
     handler: () => [
-      printLine("Hi, I'm Nikki Nguyen. This is a terminal-style sandbox for my work."),
-      printLine("Try: portfolio, apps, tour, ai", "success"),
+      printLine("Hi there - I'm Nikki, a product manager based in NYC."),
+      printLine("Currently Product Manager at EliseAI. Previously at Spline, Clearing Health, Better.com, Dropbox, and Atlassian."),
+      printLine("I'm interested in product, storytelling, creative tech, and small AI-powered experiments."),
+      printLine("Try: portfolio, bookmarks, contact, ai", "success"),
+      printLine("Tip: press Tab to autocomplete commands.", "success"),
     ],
   },
   {
@@ -473,45 +519,38 @@ const baseCommands = [
     },
   },
   {
-    name: "apps",
+    name: "bookmarks",
     aliases: [],
-    description: "List external demos.",
-    usage: "apps",
+    description: "List saved links and favorite tools.",
+    usage: "bookmarks",
     runDelay: 80,
     stepDelay: 25,
     thinkingLabel: "Working...",
     handler: () => {
-      const events = [printLine("Apps:", "success")];
-      appsData.forEach((app) => {
+      const events = [printLine("Bookmarks:", "success")];
+      bookmarksData.forEach((app) => {
         events.push(printLine(`- ${app.name} (${app.slug}): ${app.description}`));
       });
-      events.push(printLine("Use: open <app>", "success"));
+      events.push(printLine("Use: launch <bookmark> or open <url>", "success"));
       return events;
     },
   },
   {
     name: "launch",
     aliases: [],
-    description: "Open a listed app in a new tab.",
-    usage: "launch <app>",
+    description: "Queue a listed bookmark for opening.",
+    usage: "launch <bookmark>",
     handler: (args) => {
       const slug = args[0];
       if (!slug) {
-        return [printLine("Missing app slug. Usage: launch <app>", "error")];
+        return [printLine("Missing bookmark slug. Usage: launch <bookmark>", "error")];
       }
       const app = findApp(slug);
       if (!app) {
-        return [printLine(`App not found: ${slug}. Usage: launch <app>`, "error")];
+        return [printLine(`Bookmark not found: ${slug}. Usage: launch <bookmark>`, "error")];
       }
-      return [openUrl(app.url)];
+      return describeBookmark(app);
     },
-  },
-  {
-    name: "resume",
-    aliases: [],
-    description: "Open resume PDF in a new tab.",
-    usage: "resume",
-    handler: () => [openUrl("resume.pdf")],
   },
   {
     name: "contact",
@@ -519,9 +558,13 @@ const baseCommands = [
     description: "Show contact links.",
     usage: "contact",
     handler: () => [
-      linkLine("Email", "mailto:hello@example.com"),
-      linkLine("LinkedIn", "https://linkedin.com"),
-      linkLine("GitHub", "https://github.com"),
+      linkLine("Email", "mailto:nikki.nguyen8@gmail.com"),
+      linkLine("LinkedIn", "https://linkedin.com/in/nikkinguyen8/"),
+      linkLine("GitHub", "https://github.com/nikkihnguyen"),
+      linkLine("Twitter", "https://twitter.com/nikkihnguyen"),
+      linkLine("Instagram", "https://instagram.com/nikkihnguyen/"),
+      linkLine("Website", "https://nikkihnguyen.com/"),
+      printLine("Use: open <url> to queue any link for a new tab.", "success"),
     ],
   },
   {
@@ -722,7 +765,7 @@ function isOpenableFile(target) {
 
 function findApp(target) {
   const normalized = target.toLowerCase();
-  return appsData.find(
+  return bookmarksData.find(
     (item) =>
       item.slug.toLowerCase() === normalized ||
       item.name.toLowerCase() === normalized
@@ -738,13 +781,30 @@ function findProject(target) {
   );
 }
 
-function describeProject(project) {
+function queueOpenTarget(label, url, events = []) {
+  pendingOpenTarget = { label, url };
   return [
+    ...events,
+    printLine("Type `open` to open in a new tab.", "success"),
+  ];
+}
+
+function describeBookmark(bookmark) {
+  return queueOpenTarget(bookmark.name, bookmark.url, [
+    printLine(`Bookmark: ${bookmark.name}`, "success"),
+    printLine(bookmark.description),
+    printLine(`Open: ${bookmark.url}`),
+  ]);
+}
+
+function describeProject(project) {
+  return queueOpenTarget(project.name, project.url, [
     printLine(`Project: ${project.name}`, "success"),
     printLine(project.summary),
     printLine(`Tech: ${project.tech}`),
     printLine(`Highlights: ${project.highlights.join(", ")}`),
-  ];
+    printLine(`Open: ${project.url}`),
+  ]);
 }
 
 function buildCommandHelp(commandName) {
@@ -757,6 +817,149 @@ function buildCommandHelp(commandName) {
     printLine(`${entry.name} - ${entry.description}`, "success"),
     printLine(`usage: ${entry.usage}`),
     printLine(`aliases: ${aliases}`),
+    printLine("Press Tab to autocomplete commands and arguments.", "success"),
+  ];
+}
+
+function isPromiseLike(value) {
+  return !!value && typeof value.then === "function";
+}
+
+function levenshteinDistance(a, b) {
+  const rows = a.length + 1;
+  const cols = b.length + 1;
+  const dp = Array.from({ length: rows }, () => Array(cols).fill(0));
+
+  for (let i = 0; i < rows; i += 1) dp[i][0] = i;
+  for (let j = 0; j < cols; j += 1) dp[0][j] = j;
+
+  for (let i = 1; i < rows; i += 1) {
+    for (let j = 1; j < cols; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + cost
+      );
+    }
+  }
+
+  return dp[a.length][b.length];
+}
+
+function getCommandSuggestions(input) {
+  const normalized = input.toLowerCase();
+  return getUniqueCommandNames()
+    .map((name) => ({
+      name,
+      distance: levenshteinDistance(normalized, name),
+      startsWith: name.startsWith(normalized) || normalized.startsWith(name),
+      includes: name.includes(normalized) || normalized.includes(name),
+    }))
+    .filter((item) => item.distance <= 3 || item.startsWith || item.includes)
+    .sort((a, b) => {
+      if (a.startsWith !== b.startsWith) return a.startsWith ? -1 : 1;
+      if (a.includes !== b.includes) return a.includes ? -1 : 1;
+      if (a.distance !== b.distance) return a.distance - b.distance;
+      return a.name.localeCompare(b.name);
+    })
+    .slice(0, 3)
+    .map((item) => item.name);
+}
+
+function formatDuration(ms) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes === 0) return `${seconds}s`;
+  if (minutes < 60) return `${minutes}m ${seconds}s`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m`;
+}
+
+function getApproxLocationLabel(locationData) {
+  if (!locationData) return "Unavailable";
+  const parts = [locationData.city, locationData.region, locationData.country_name]
+    .filter(Boolean);
+  return parts.length ? parts.join(", ") : "Unavailable";
+}
+
+async function getGeoProfile() {
+  if (!geoProfilePromise) {
+    geoProfilePromise = (async () => {
+      try {
+        const response = await fetch("https://ipapi.co/json/");
+        if (!response.ok) {
+          throw new Error(`ip lookup failed: ${response.status}`);
+        }
+        const data = await response.json();
+        return {
+          ip: data.ip || "Unavailable",
+          location: getApproxLocationLabel(data),
+          network: data.org || data.asn || "Unavailable",
+          postal: data.postal || "Unavailable",
+          timezone: data.timezone || "Unavailable",
+        };
+      } catch (error) {
+        return {
+          ip: "Unavailable",
+          location: "Unavailable",
+          network: "Unavailable",
+          postal: "Unavailable",
+          timezone: "Unavailable",
+        };
+      }
+    })();
+  }
+  return geoProfilePromise;
+}
+
+async function getSessionSnapshot() {
+  const geo = await getGeoProfile();
+  const sessionUptime = Date.now() - sessionStats.startedAt;
+  const nav = window.navigator;
+  const userAgent =
+    nav.userAgentData?.brands
+      ?.map((brand) => `${brand.brand} ${brand.version}`)
+      .join(", ") || nav.userAgent;
+  const languages = Array.isArray(nav.languages) && nav.languages.length
+    ? nav.languages.join(", ")
+    : nav.language || "Unavailable";
+  const localTime = new Date().toLocaleString("en-US", {
+    dateStyle: "medium",
+    timeStyle: "medium",
+  });
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "Unavailable";
+
+  return [
+    printLine(`user: ${shellState.user}`, "success"),
+    printLine(`host: ${shellState.host}`),
+    printLine(`public ip: ${geo.ip}`),
+    printLine(`approx location: ${geo.location}`),
+    printLine(`network: ${geo.network}`),
+    printLine(`timezone: ${timezone}`),
+    printLine(`local time: ${localTime}`),
+    printLine(`language: ${languages}`),
+    printLine(`browser: ${userAgent}`),
+    printLine(
+      `screen: ${window.screen.width}x${window.screen.height} @ ${window.devicePixelRatio || 1}x`
+    ),
+    printLine(`viewport: ${window.innerWidth}x${window.innerHeight}`),
+    printLine(`platform: ${nav.userAgentData?.platform || nav.platform || "Unavailable"}`),
+    printLine(`cpu threads: ${nav.hardwareConcurrency || "Unavailable"}`),
+    printLine(`device memory: ${nav.deviceMemory ? `${nav.deviceMemory} GB` : "Unavailable"}`),
+    printLine(`touch points: ${nav.maxTouchPoints || 0}`),
+    printLine(`cookies: ${nav.cookieEnabled ? "enabled" : "disabled"}`),
+    printLine(`online: ${nav.onLine ? "yes" : "no"}`),
+    printLine(
+      `appearance: ${
+        window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
+      }`
+    ),
+    printLine(`spinner: ${thinkingSpinnerName}`),
+    printLine(`commands this session: ${sessionStats.commandsExecuted}`),
+    printLine(`session uptime: ${formatDuration(sessionUptime)}`),
+    printLine(`cwd: ${shellState.cwd}`),
   ];
 }
 
@@ -906,12 +1109,24 @@ function updateCaret() {
   caretEl.style.transform = `translateX(${offset}px)`;
 }
 
+function getCursorOffset() {
+  if (!measureEl) return 0;
+  const caretIndex =
+    typeof inputEl.selectionStart === "number"
+      ? inputEl.selectionStart
+      : inputEl.value.length;
+  measureEl.textContent = inputEl.value.slice(0, caretIndex) || "";
+  const width = measureEl.getBoundingClientRect().width;
+  return Math.max(0, width - inputEl.scrollLeft);
+}
+
 function setInputValue(value) {
   inputEl.value = value;
   tabState = { value: "", timestamp: 0 };
   const end = value.length;
   inputEl.setSelectionRange(end, end);
   updateCaret();
+  updateInputAssist();
 }
 
 function parseInput(input) {
@@ -946,6 +1161,187 @@ function parseInput(input) {
   return { command, args, flags, raw: input };
 }
 
+function getDirectoryCompletionEntries(path) {
+  const node = getNode(path);
+  if (!node || node.type !== "dir" || !node.entries) return [];
+  return Object.keys(node.entries)
+    .sort((a, b) => a.localeCompare(b))
+    .map((name) => ({
+      name,
+      node: node.entries[name],
+    }));
+}
+
+function getUniqueCommandNames() {
+  return [...new Set(baseCommands.map((command) => command.name))].sort();
+}
+
+function getPathCompletionCandidates(token, directoriesOnly = false) {
+  const rawToken = token || "";
+  const slashIndex = rawToken.lastIndexOf("/");
+  const dirToken = slashIndex >= 0 ? rawToken.slice(0, slashIndex + 1) : "";
+  const baseToken = slashIndex >= 0 ? rawToken.slice(slashIndex + 1) : rawToken;
+  const dirPath = dirToken
+    ? resolvePath(dirToken.endsWith("/") ? dirToken.slice(0, -1) : dirToken)
+    : shellState.cwd;
+
+  return getDirectoryCompletionEntries(dirPath)
+    .filter(({ name, node }) => {
+      if (directoriesOnly && node.type !== "dir") return false;
+      return name.toLowerCase().startsWith(baseToken.toLowerCase());
+    })
+    .map(({ name, node }) => `${dirToken}${name}${node.type === "dir" ? "/" : ""}`);
+}
+
+function getCompletionCandidates(command, args, currentToken) {
+  if (!command) {
+    return getUniqueCommandNames();
+  }
+
+  switch (command) {
+    case "launch":
+      if (args.length > 1) return [];
+      return bookmarksData.map((item) => item.slug);
+    case "open":
+      if (args.length > 1) return [];
+      return [
+        ...projectData.map((item) => item.slug),
+        ...bookmarksData.map((item) => item.slug),
+        "about.txt",
+        "portfolio.txt",
+        "bookmarks.txt",
+        "links.txt",
+      ];
+    case "cat":
+      if (args.length > 1) return [];
+      return ["about.txt", "portfolio.txt", "bookmarks.txt", "links.txt", "welcome.txt"];
+    case "cd":
+      if (args.length > 1) return [];
+      return getPathCompletionCandidates(currentToken, true);
+    case "ls":
+      if (args.length > 1) return [];
+      return getPathCompletionCandidates(currentToken, false);
+    case "theme":
+      if (args.length > 1) return [];
+      return themeOptions;
+    case "help":
+    case "man":
+      if (args.length > 1) return [];
+      return getUniqueCommandNames();
+    default:
+      return [];
+  }
+}
+
+function getCompletionState(rawValue) {
+  if (mode !== "shell") {
+    return {
+      matches: [],
+      bestMatch: "",
+      completedValue: "",
+      helperText: mode === "ai"
+        ? "AI mode: ask a question, or type exit to return."
+        : "Flow mode: answer the current prompt, or type exit to leave.",
+    };
+  }
+
+  const value = rawValue || "";
+  const endsWithSpace = /\s$/.test(value);
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return {
+      matches: [],
+      bestMatch: "",
+      completedValue: "",
+      helperText: "Try about, portfolio, bookmarks, contact, or whoami. Press Tab to autocomplete.",
+    };
+  }
+
+  const parts = value.split(/\s+/).filter(Boolean);
+  const command = parts[0]?.toLowerCase() || "";
+  const args = parts.slice(1);
+  const currentToken = endsWithSpace ? "" : parts[parts.length - 1] || "";
+  const tokenPrefix =
+    value.lastIndexOf(" ") >= 0 ? value.slice(0, value.lastIndexOf(" ") + 1) : "";
+  const isCommandPosition = parts.length <= 1 && !value.includes(" ");
+
+  const candidates =
+    isCommandPosition
+      ? getUniqueCommandNames()
+      : getCompletionCandidates(command, args, currentToken);
+
+  const listMatches = currentToken
+    ? candidates.filter((candidate) =>
+        candidate.toLowerCase().startsWith(currentToken.toLowerCase())
+      )
+    : candidates;
+  const matches = currentToken
+    ? candidates.filter((candidate) =>
+        candidate.toLowerCase().startsWith(currentToken.toLowerCase())
+      )
+    : [];
+  const bestMatch = matches[0] || "";
+
+  let completedValue = "";
+  if (bestMatch) {
+    if (isCommandPosition) {
+      completedValue = `${bestMatch} `;
+    } else {
+      completedValue = `${tokenPrefix}${bestMatch}`;
+      if (matches.length === 1 && bestMatch === currentToken) {
+        completedValue = `${tokenPrefix}${bestMatch} `;
+      }
+    }
+  }
+
+  let helperText = "Press Tab to autocomplete.";
+  if (!isCommandPosition && !currentToken) {
+    helperText = `Type a ${command} target, or press Tab twice to list options.`;
+  } else if (matches.length === 1) {
+    helperText = `Tab completes to ${bestMatch}`;
+  } else if (matches.length > 1) {
+    helperText = `Tab completes to ${bestMatch}. Double-Tab lists ${matches.length} matches.`;
+  } else {
+    helperText = "No autocomplete matches.";
+  }
+
+  return { matches, listMatches, bestMatch, completedValue, helperText };
+}
+
+function updateInputAssist() {
+  if (!helperEl || !ghostEl) return;
+
+  const { completedValue, helperText } = getCompletionState(inputEl.value);
+  helperEl.textContent = helperText;
+
+  const selectionAtEnd =
+    typeof inputEl.selectionStart === "number" &&
+    typeof inputEl.selectionEnd === "number" &&
+    inputEl.selectionStart === inputEl.selectionEnd &&
+    inputEl.selectionEnd === inputEl.value.length;
+  const suffix =
+    completedValue && completedValue.startsWith(inputEl.value)
+      ? completedValue.slice(inputEl.value.length)
+      : "";
+
+  const shouldShowGhost =
+    mode === "shell" &&
+    !!inputEl.value &&
+    !!suffix &&
+    selectionAtEnd &&
+    document.activeElement === inputEl;
+
+  if (!shouldShowGhost) {
+    ghostEl.textContent = "";
+    ghostEl.style.transform = "translateX(0)";
+    return;
+  }
+
+  ghostEl.textContent = suffix;
+  ghostEl.style.transform = `translateX(${getCursorOffset()}px)`;
+}
+
 function setRunning(next) {
   isRunning = next;
   inputEl.disabled = next;
@@ -953,6 +1349,7 @@ function setRunning(next) {
     inputEl.focus({ preventScroll: true });
     updateCaret();
   }
+  updateInputAssist();
 }
 
 function clearPendingTimers() {
@@ -976,12 +1373,15 @@ function queueEvents(events, options = {}) {
   const stepDelay =
     typeof options.stepDelay === "number" ? options.stepDelay : DEFAULT_STEP_DELAY;
   const thinkingLabel = options.thinkingLabel || "Thinking...";
+  const showThinking = options.showThinking !== false;
   setRunning(true);
-  startThinkingIndicator(thinkingLabel);
+  if (showThinking) {
+    startThinkingIndicator(thinkingLabel);
+  }
   let totalDelay = initialDelay;
   queuedEvents.forEach((event, index) => {
     scheduleEvent(() => {
-      if (index === 0) {
+      if (showThinking && index === 0) {
         stopThinkingIndicator();
       }
       renderEvent(event);
@@ -989,14 +1389,49 @@ function queueEvents(events, options = {}) {
     totalDelay += stepDelay;
   });
   scheduleEvent(() => {
-    stopThinkingIndicator();
+    if (showThinking) {
+      stopThinkingIndicator();
+    }
     setRunning(false);
     saveOutput();
   }, totalDelay);
 }
 
+async function queueAsyncEvents(eventsPromise, options = {}) {
+  const token = ++activeAsyncCommandToken;
+  const thinkingLabel = options.thinkingLabel || "Thinking...";
+  const stepDelay =
+    typeof options.stepDelay === "number" ? options.stepDelay : DEFAULT_STEP_DELAY;
+
+  setRunning(true);
+  startThinkingIndicator(thinkingLabel);
+
+  try {
+    const events = await eventsPromise;
+    if (token !== activeAsyncCommandToken) return;
+    stopThinkingIndicator();
+    queueEvents(events, {
+      initialDelay: 0,
+      stepDelay,
+      showThinking: false,
+    });
+  } catch (error) {
+    if (token !== activeAsyncCommandToken) return;
+    stopThinkingIndicator();
+    queueEvents(
+      [printLine("whoami: unable to inspect this session right now", "error")],
+      {
+        initialDelay: 0,
+        stepDelay: 0,
+        showThinking: false,
+      }
+    );
+  }
+}
+
 function interruptRunning() {
   if (!isRunning) return false;
+  activeAsyncCommandToken += 1;
   clearPendingTimers();
   setRunning(false);
   return true;
@@ -1013,7 +1448,14 @@ function runCommand(input) {
   const { command, args } = parseInput(trimmed);
   const entry = commandRegistry.get(command);
   if (!entry) {
-    queueEvents([printLine(`zsh: command not found: ${command}`, "error")], {
+    const suggestions = getCommandSuggestions(command);
+    const events = [printLine(`zsh: command not found: ${command}`, "error")];
+    if (suggestions.length > 0) {
+      events.push(printLine(`Did you mean: ${suggestions.join(", ")}?`, "success"));
+    } else {
+      events.push(printLine("Try: help", "success"));
+    }
+    queueEvents(events, {
       initialDelay: DEFAULT_COMMAND_DELAY,
       stepDelay: 0,
       thinkingLabel: "Thinking...",
@@ -1021,7 +1463,16 @@ function runCommand(input) {
     return;
   }
 
-  const events = entry.handler(args) || [];
+  const result = entry.handler(args);
+  if (isPromiseLike(result)) {
+    queueAsyncEvents(result, {
+      thinkingLabel: entry.thinkingLabel,
+      stepDelay: entry.stepDelay || DEFAULT_STEP_DELAY,
+    });
+    return;
+  }
+
+  const events = result || [];
   const runDelay = Math.max(entry.runDelay || 0, DEFAULT_COMMAND_DELAY);
   const stepDelay = entry.stepDelay || 0;
   queueEvents(events, {
@@ -1048,11 +1499,13 @@ function renderEvent(event) {
       break;
     case "clear":
       outputEl.innerHTML = "";
+      pendingOpenTarget = null;
       isUserAtBottom = true;
       updateJumpButton();
       break;
     case "reset":
       outputEl.innerHTML = "";
+      pendingOpenTarget = null;
       shellState.cwd = shellState.home;
       mode = "shell";
       updatePrompt();
@@ -1263,15 +1716,21 @@ function handleAIInput(input) {
 function generateAIReply(input) {
   const lower = input.toLowerCase();
   if (lower.includes("portfolio")) {
-    return "Try `portfolio` to list projects, then `open <slug>` for details.";
+    return "Try `portfolio` to list projects from the desktop OS portfolio, then `open <slug>` for details.";
   }
-  if (lower.includes("resume")) {
-    return "Use `resume` to open the PDF in a new tab.";
+  if (lower.includes("bookmark") || lower.includes("tool")) {
+    return "Use `bookmarks` to browse Nikki's saved links and tools, then `launch <bookmark>` to open one.";
+  }
+  if (lower.includes("contact") || lower.includes("email")) {
+    return "Use `contact` for Nikki's email and social links.";
+  }
+  if (lower.includes("work") || lower.includes("experience")) {
+    return "Nikki is currently a Product Manager at EliseAI, after roles at Spline, Clearing Health, Better.com, Dropbox, and Atlassian.";
   }
   if (lower.includes("help")) {
     return "Type `help` for the command list. I can guide you too.";
   }
-  return "I'm a lightweight AI stub. Ask about the portfolio, apps, or commands.";
+  return "Ask about Nikki's work, portfolio, bookmarks, or contact links.";
 }
 
 function safeStorageGet(key) {
@@ -1343,6 +1802,7 @@ function updatePrompt() {
     promptEl.textContent = `ai@${shellState.host} ${path} %`;
   }
   updateTitle();
+  updateInputAssist();
 }
 
 function updateTitle() {
@@ -1524,22 +1984,20 @@ inputEl.addEventListener("keydown", (event) => {
     event.preventDefault();
     if (isRunning) return;
     const rawValue = inputEl.value;
-    const value = rawValue.trim();
-    if (!value || rawValue.includes(" ")) return;
-    const matches = baseCommands
-      .map((cmd) => cmd.name)
-      .filter((name) => name.startsWith(value));
+    const { matches, listMatches, completedValue } = getCompletionState(rawValue);
+    if (!rawValue.trim()) return;
     if (matches.length === 1) {
-      setInputValue(matches[0] + " ");
+      setInputValue(completedValue);
       tabState = { value: "", timestamp: 0 };
-    } else if (matches.length > 1) {
+    } else if (listMatches.length > 0) {
       const now = Date.now();
-      if (tabState.value === value && now - tabState.timestamp < 800) {
-        appendLine(matches.join("    "));
+      if (tabState.value === rawValue && now - tabState.timestamp < 800) {
+        appendLine(listMatches.join("    "));
         saveOutput();
         tabState = { value: "", timestamp: 0 };
       } else {
-        tabState = { value, timestamp: now };
+        setInputValue(completedValue || rawValue);
+        tabState = { value: completedValue || rawValue, timestamp: now };
       }
     }
   }
@@ -1548,9 +2006,13 @@ inputEl.addEventListener("keydown", (event) => {
 inputEl.addEventListener("input", () => {
   tabState = { value: "", timestamp: 0 };
   updateCaret();
+  updateInputAssist();
 });
 inputEl.addEventListener("scroll", updateCaret);
-inputEl.addEventListener("keyup", updateCaret);
+inputEl.addEventListener("keyup", () => {
+  updateCaret();
+  updateInputAssist();
+});
 inputEl.addEventListener("click", updateCaret);
 inputEl.addEventListener("select", updateCaret);
 inputEl.addEventListener("focus", () => {
@@ -1558,15 +2020,18 @@ inputEl.addEventListener("focus", () => {
     inputWrapEl.classList.add("is-focused");
   }
   updateCaret();
+  updateInputAssist();
 });
 inputEl.addEventListener("blur", () => {
   if (inputWrapEl) {
     inputWrapEl.classList.remove("is-focused");
   }
+  updateInputAssist();
 });
 window.addEventListener("resize", () => {
   updateCaret();
   updateTitle();
+  updateInputAssist();
 });
 
 outputEl.addEventListener("scroll", () => {
@@ -1577,6 +2042,7 @@ outputEl.addEventListener("scroll", () => {
 outputEl.addEventListener("click", () => {
   inputEl.focus();
   updateCaret();
+  updateInputAssist();
 });
 
 terminalEl.addEventListener("click", (event) => {
@@ -1584,6 +2050,7 @@ terminalEl.addEventListener("click", (event) => {
   if (target instanceof HTMLElement && target.tagName === "BUTTON") return;
   inputEl.focus();
   updateCaret();
+  updateInputAssist();
 });
 
 if (jumpButton) {
@@ -1610,3 +2077,4 @@ if (inputWrapEl) {
   inputWrapEl.classList.add("is-focused");
 }
 updateCaret();
+updateInputAssist();

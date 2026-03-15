@@ -101,6 +101,20 @@ pre {
   min-height: 20px;
 }
 
+.terminal__ghost {
+  position: absolute;
+  top: 0;
+  left: 0;
+  color: rgba(241, 241, 241, 0.28);
+  font-size: 14px;
+  line-height: 1.4;
+  white-space: pre;
+  pointer-events: none;
+  user-select: none;
+  overflow: hidden;
+  z-index: 0;
+}
+
 .terminal__input {
   width: 100%;
   background: transparent;
@@ -111,6 +125,8 @@ pre {
   line-height: 1.4;
   outline: none;
   caret-color: transparent;
+  position: relative;
+  z-index: 1;
 }
 
 .terminal__caret {
@@ -145,6 +161,15 @@ pre {
   font-size: 14px;
   line-height: 1.4;
   letter-spacing: normal;
+}
+
+.terminal__helper {
+  min-height: 1.4em;
+  padding: 0 20px 14px;
+  color: rgba(241, 241, 241, 0.52);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-wrap;
 }
 
 .output-line {
@@ -262,6 +287,10 @@ pre {
 
   .terminal__input-line {
     padding: 8px 16px 16px;
+  }
+
+  .terminal__helper {
+    padding: 0 16px 14px;
   }
 }
 
