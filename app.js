@@ -7,12 +7,14 @@ const promptEl = document.getElementById("prompt");
 const jumpButton = document.getElementById("jump-to-bottom");
 const sizeMeasureEl = document.getElementById("terminal-size-measure");
 const terminalEl = document.getElementById("terminal");
+const inputLineEl = document.getElementById("input-line");
 const caretEl = document.getElementById("terminal-caret");
 const measureEl = document.getElementById("terminal-measure");
 const inputWrapEl = document.querySelector(".terminal__input-wrap");
 const ghostEl = document.getElementById("terminal-ghost");
 const helperEl = document.getElementById("terminal-helper");
 const flowEl = document.getElementById("terminal-flow");
+const mobileViewQuery = window.matchMedia("(max-width: 720px)");
 
 const STORAGE_KEYS = {
   shellOutput: "terminalos.shell.output",
@@ -184,6 +186,7 @@ const featuredProjectSlugs = [
 const featuredBookmarkSlugs = ["terminal-os", "spline", "cursor", "claude"];
 const FLOW_BACK_VALUE = "back";
 const FLOW_EXIT_VALUE = "exit";
+const MOBILE_CLI_BOX_WIDTH = 38;
 const SLASH_COMMAND_NAMES = new Set([
   "help",
   "preview",
@@ -1113,20 +1116,21 @@ function formatArtRows(rows = [], width = CLI_BOX_WIDTH) {
 }
 
 function createArtBox({ title = "", rows = [], width = CLI_BOX_WIDTH }) {
+  const resolvedWidth = isMobileView() ? Math.min(width, MOBILE_CLI_BOX_WIDTH) : width;
   const topLabel = title ? ` ${title} ` : "";
   const top =
-    topLabel.length && topLabel.length < width
-      ? `╭${topLabel}${"─".repeat(width + 2 - topLabel.length)}╮`
-      : `╭${"─".repeat(width + 2)}╮`;
-  const bottom = `╰${"─".repeat(width + 2)}╯`;
+    topLabel.length && topLabel.length < resolvedWidth
+      ? `╭${topLabel}${"─".repeat(resolvedWidth + 2 - topLabel.length)}╮`
+      : `╭${"─".repeat(resolvedWidth + 2)}╮`;
+  const bottom = `╰${"─".repeat(resolvedWidth + 2)}╯`;
   const lines = [top];
 
-  formatArtRows(rows, width).forEach((row) => {
+  formatArtRows(rows, resolvedWidth).forEach((row) => {
     if (row === "__DIVIDER__") {
-      lines.push(`├${"─".repeat(width + 2)}┤`);
+      lines.push(`├${"─".repeat(resolvedWidth + 2)}┤`);
       return;
     }
-    lines.push(`│ ${padArtText(row, width)} │`);
+    lines.push(`│ ${padArtText(row, resolvedWidth)} │`);
   });
 
   lines.push(bottom);
@@ -1146,6 +1150,19 @@ function createArtOutputNode(className = "") {
 }
 
 function createWelcomeArt() {
+  if (isMobileView()) {
+    return createArtBox({
+      title: "terminalOS",
+      rows: [
+        "Touch-first terminal portfolio.",
+        "Projects, links, experiments, and playful tools.",
+        { divider: true },
+        { label: "surfaces", value: "/about · /portfolio · /bookmarks · /contact · /os · whoami" },
+        { label: "hint", value: "Type / for custom commands. Tap a command to run. /preview <target> shows detail." },
+      ],
+    });
+  }
+
   return createArtBox({
     title: "terminalOS",
     rows: [
@@ -1567,7 +1584,12 @@ function buildCommandHelp(commandName) {
           { label: "usage", value: getCommandUsage(entry) },
           { label: "aliases", value: aliases },
           ...(examples[entry.name] ? [{ label: "example", value: examples[entry.name].replace(/^Examples:\s*/i, "") }] : []),
-          { label: "input", value: "Tab completes arguments too." },
+          {
+            label: "input",
+            value: isMobileView()
+              ? "Tap commands or keep typing for suggestions."
+              : "Tab completes arguments too.",
+          },
         ],
       }),
       "success"
@@ -2032,7 +2054,9 @@ function addOutputNode(node) {
 
 function getFlowStepPrompt(step, answers = {}) {
   if (!step) return "";
-  return typeof step.prompt === "function" ? step.prompt(answers) : step.prompt || "";
+  const prompt = typeof step.prompt === "function" ? step.prompt(answers) : step.prompt || "";
+  if (!isMobileView()) return prompt;
+  return String(prompt).replace(/Use arrows or type\.?/g, "Tap or type.");
 }
 
 function getFlowStepChoices(step, answers = {}) {
@@ -2057,20 +2081,35 @@ function renderFlowStepContent(node, step, answers = {}, selectedIndex = 0) {
   if (step.type === "choice" && choices.length) {
     choices.forEach((choice, index) => {
       const isSelected = index === selectedIndex;
-      const choiceNode = document.createElement("div");
+      const choiceNode = document.createElement("button");
+      choiceNode.type = "button";
+      choiceNode.tabIndex = -1;
       choiceNode.className = isSelected ? "flow-step__choice is-selected" : "flow-step__choice";
       choiceNode.dataset.choiceIndex = String(index);
+      choiceNode.setAttribute("aria-pressed", isSelected ? "true" : "false");
 
       const marker = document.createElement("span");
       marker.className = "flow-step__marker";
       marker.textContent = isSelected ? "→" : "·";
 
+      const textWrap = document.createElement("span");
+      textWrap.className = "flow-step__text";
+
       const label = document.createElement("span");
       label.className = "flow-step__label";
       label.textContent = choice.label;
 
+      textWrap.appendChild(label);
+
+      if (choice.description) {
+        const description = document.createElement("span");
+        description.className = "flow-step__description";
+        description.textContent = choice.description;
+        textWrap.appendChild(description);
+      }
+
       choiceNode.appendChild(marker);
-      choiceNode.appendChild(label);
+      choiceNode.appendChild(textWrap);
       node.appendChild(choiceNode);
     });
   }
@@ -2112,6 +2151,7 @@ function updateFlowStepNode() {
   renderedChoices.forEach((choiceNode, index) => {
     const isSelected = index === (flowState.selectedChoiceIndex || 0);
     choiceNode.classList.toggle("is-selected", isSelected);
+    choiceNode.setAttribute("aria-pressed", isSelected ? "true" : "false");
 
     const markerNode = choiceNode.querySelector(".flow-step__marker");
     if (markerNode) {
@@ -2137,6 +2177,85 @@ function moveFlowSelection(delta) {
   updateFlowStepNode();
   updateCaret();
   updateInputAssist();
+  return true;
+}
+
+function isMobileView() {
+  return mobileViewQuery.matches;
+}
+
+function blurInput() {
+  if (document.activeElement === inputEl) {
+    inputEl.blur();
+  }
+}
+
+function syncMobileViewport() {
+  const rootStyle = document.documentElement.style;
+  if (!isMobileView()) {
+    rootStyle.removeProperty("--mobile-app-height");
+    return;
+  }
+  const viewportHeight = window.visualViewport?.height || window.innerHeight;
+  rootStyle.setProperty("--mobile-app-height", `${Math.round(viewportHeight)}px`);
+}
+
+function submitShellInput(value, options = {}) {
+  const { blurAfter = false } = options;
+  const trimmed = String(value || "").trim();
+  if (!trimmed || isRunning) return;
+  shellHistoryIndex = pushHistoryEntry(shellHistory, trimmed);
+  setInputValue("");
+  runCommand(trimmed);
+  if (blurAfter && isMobileView()) {
+    blurInput();
+  }
+}
+
+function submitFlowInput(value) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed || isRunning) return;
+  setInputValue("");
+  beginOutputCapture();
+  appendCommandEcho(trimmed);
+  queueFlowSubmission(trimmed);
+}
+
+function slashCommandNeedsArgument(entry) {
+  return /<[^>]+>/.test(String(entry?.usage || ""));
+}
+
+function activateFlowChoice(choiceIndex) {
+  if (mode !== "flow" || !currentFlow || !flowState || isRunning) return false;
+  const step = currentFlow.steps[flowState.stepId];
+  const choices = getFlowStepChoices(step, flowState.answers);
+  const choice = choices[choiceIndex];
+  if (!step || step.type !== "choice" || !choice) return false;
+  flowState.selectedChoiceIndex = choiceIndex;
+  inputEl.value = choice.value || "";
+  updateFlowStepNode();
+  updateCaret();
+  updateInputAssist();
+  submitFlowInput(choice.value || "");
+  if (isMobileView()) {
+    blurInput();
+  }
+  return true;
+}
+
+function activateShellSlashChoice(choiceIndex) {
+  if (mode !== "shell" || isRunning) return false;
+  const paletteState = getShellSlashPaletteState(inputEl.value);
+  const entry = paletteState.matches[choiceIndex];
+  if (!paletteState.active || !entry) return false;
+  shellSlashSelectedIndex = choiceIndex;
+  const displayName = getCommandDisplayName(entry);
+  if (slashCommandNeedsArgument(entry)) {
+    setInputValue(`${displayName} `);
+    focusInput({ force: true });
+    return true;
+  }
+  submitShellInput(displayName, { blurAfter: true });
   return true;
 }
 
@@ -2372,8 +2491,12 @@ function getShellSlashPaletteState(rawValue) {
   const selectedEntry = matches[selectedIndex] || null;
   const selectedValue = selectedEntry ? getCommandDisplayName(selectedEntry) : "";
   const prompt = selectedEntry
-    ? `Slash commands. ${selectedValue}: ${selectedEntry.description}  ·  Enter runs  ·  Tab completes.`
-    : "Slash commands. Type to filter custom commands.";
+    ? isMobileView()
+      ? `Slash commands. ${selectedValue}: ${selectedEntry.description}  ·  Tap a command to run.`
+      : `Slash commands. ${selectedValue}: ${selectedEntry.description}  ·  Enter runs  ·  Tab completes.`
+    : isMobileView()
+      ? "Slash commands. Type to filter or tap a command."
+      : "Slash commands. Type to filter custom commands.";
 
   return {
     active: true,
@@ -2381,7 +2504,11 @@ function getShellSlashPaletteState(rawValue) {
     selectedIndex,
     selectedEntry,
     selectedValue,
-    choiceValues: matches.map((entry) => getCommandDisplayName(entry)),
+    choiceValues: matches.map((entry) => ({
+      label: getCommandDisplayName(entry),
+      value: getCommandDisplayName(entry),
+      description: entry.description,
+    })),
     prompt,
   };
 }
@@ -2413,7 +2540,7 @@ function renderShellSlashMenu(rawValue = inputEl.value) {
     {
       prompt: paletteState.prompt,
       type: "choice",
-      choices: paletteState.choiceValues.map((value) => ({ label: value, value })),
+      choices: paletteState.choiceValues,
     },
     {},
     paletteState.selectedIndex
@@ -2424,8 +2551,8 @@ function getShellSlashCompletionState(rawValue) {
   const paletteState = getShellSlashPaletteState(rawValue);
   if (paletteState.active) {
     return {
-      matches: paletteState.choiceValues,
-      listMatches: paletteState.choiceValues,
+      matches: paletteState.choiceValues.map((choice) => choice.value),
+      listMatches: paletteState.choiceValues.map((choice) => choice.value),
       bestMatch: paletteState.selectedValue,
       completedValue: paletteState.selectedValue,
       helperText: paletteState.selectedEntry
@@ -2480,11 +2607,15 @@ function getShellSlashCompletionState(rawValue) {
 
   let helperText = `${getCommandDisplayName(entry)}: ${entry.description}`;
   if (!currentToken) {
-    helperText = `${getCompletionHint(command)}. Tab twice lists.`;
+    helperText = isMobileView()
+      ? `${getCompletionHint(command)}. Keep typing or tap a suggestion.`
+      : `${getCompletionHint(command)}. Tab twice lists.`;
   } else if (matches.length === 1) {
-    helperText = `Tab completes to ${bestMatch}`;
+    helperText = isMobileView() ? `Keep typing or tap ${bestMatch}.` : `Tab completes to ${bestMatch}`;
   } else if (matches.length > 1) {
-    helperText = `Tab completes to ${bestMatch}. ${matches.length} matches.`;
+    helperText = isMobileView()
+      ? `${matches.length} matches. Keep typing or tap a suggestion.`
+      : `Tab completes to ${bestMatch}. ${matches.length} matches.`;
   } else if (currentToken) {
     helperText = "No autocomplete matches.";
   }
@@ -2527,7 +2658,13 @@ function getFlowCompletionState(rawValue) {
       listMatches: choices.map((choice) => String(choice.value)),
       bestMatch: "",
       completedValue: "",
-      helperText: selectedValue ? `Selected: ${selectedValue}  ·  Arrow keys move  ·  Tab cycles.` : "Arrow keys move. Tab cycles.",
+      helperText: selectedValue
+        ? isMobileView()
+          ? `Selected: ${selectedValue}  ·  Tap an option to continue.`
+          : `Selected: ${selectedValue}  ·  Arrow keys move  ·  Tab cycles.`
+        : isMobileView()
+          ? "Tap an option or keep typing."
+          : "Arrow keys move. Tab cycles.",
     };
   }
 
@@ -2540,9 +2677,11 @@ function getFlowCompletionState(rawValue) {
   const bestMatch = bestChoice ? String(bestChoice.value) : "";
   let helperText = "No matches.";
   if (choiceMatches.length === 1) {
-    helperText = `Tab completes to ${bestMatch}`;
+    helperText = isMobileView() ? `Tap ${bestMatch} or keep typing.` : `Tab completes to ${bestMatch}`;
   } else if (choiceMatches.length > 1) {
-    helperText = `Tab completes to ${bestMatch}. ${choiceMatches.length} matches.`;
+    helperText = isMobileView()
+      ? `${choiceMatches.length} matches. Tap an option or keep typing.`
+      : `Tab completes to ${bestMatch}. ${choiceMatches.length} matches.`;
   }
 
   return {
@@ -2626,13 +2765,17 @@ function getCompletionState(rawValue) {
     }
   }
 
-  let helperText = "Tab to complete.";
+  let helperText = isMobileView() ? "Keep typing to autocomplete." : "Tab to complete.";
   if (!isCommandPosition && !currentToken) {
-    helperText = `${getCompletionHint(command)}. Tab twice lists.`;
+    helperText = isMobileView()
+      ? `${getCompletionHint(command)}. Keep typing to refine it.`
+      : `${getCompletionHint(command)}. Tab twice lists.`;
   } else if (matches.length === 1) {
-    helperText = `Tab completes to ${bestMatch}`;
+    helperText = isMobileView() ? `Keep typing to ${bestMatch}.` : `Tab completes to ${bestMatch}`;
   } else if (matches.length > 1) {
-    helperText = `Tab completes to ${bestMatch}. ${matches.length} matches.`;
+    helperText = isMobileView()
+      ? `${matches.length} matches. Keep typing to refine the command.`
+      : `Tab completes to ${bestMatch}. ${matches.length} matches.`;
   } else {
     helperText = "No autocomplete matches.";
   }
@@ -2684,7 +2827,13 @@ function setRunning(next) {
   updateInputAssist();
 }
 
-function focusInput() {
+function focusInput(options = {}) {
+  const { force = false } = options;
+  if (isMobileView() && !force) {
+    updateCaret();
+    updateInputAssist();
+    return;
+  }
   inputEl.focus({ preventScroll: true });
   updateCaret();
   updateInputAssist();
@@ -3481,15 +3630,12 @@ inputEl.addEventListener("keydown", (event) => {
         value = paletteState.selectedValue;
       }
     }
-    inputEl.value = "";
-    shellSlashSelectedIndex = 0;
-    updateCaret();
 
     if (mode === "shell") {
       if (value.trim()) {
-        shellHistoryIndex = pushHistoryEntry(shellHistory, value.trim());
-        runCommand(value);
+        submitShellInput(value);
       } else {
+        setInputValue("");
         appendCommandEcho("");
         saveOutput();
         scrollToBottom();
@@ -3498,9 +3644,7 @@ inputEl.addEventListener("keydown", (event) => {
     }
 
     if (mode === "flow") {
-      beginOutputCapture();
-      appendCommandEcho(value);
-      queueFlowSubmission(value);
+      submitFlowInput(value);
       return;
     }
 
@@ -3508,6 +3652,7 @@ inputEl.addEventListener("keydown", (event) => {
       if (value.trim()) {
         aiHistoryIndex = pushHistoryEntry(aiHistory, value.trim());
       }
+      setInputValue("");
       appendCommandEcho(value);
       handleAIInput(value);
       return;
@@ -3641,6 +3786,7 @@ inputEl.addEventListener("blur", () => {
   updateInputAssist();
 });
 window.addEventListener("resize", () => {
+  syncMobileViewport();
   updateCaret();
   updateTitle();
   updateInputAssist();
@@ -3652,20 +3798,73 @@ outputEl.addEventListener("scroll", () => {
 });
 
 outputEl.addEventListener("click", () => {
+  if (isMobileView()) {
+    blurInput();
+    return;
+  }
   focusInput();
 });
 
 terminalEl.addEventListener("click", (event) => {
   const target = event.target;
-  if (target instanceof HTMLElement && target.tagName === "BUTTON") return;
+  if (!(target instanceof HTMLElement)) return;
+  if (target.tagName === "BUTTON") return;
+  if (target.closest(".flow-step__choice")) return;
+  if (target.closest("a")) return;
+  if (inputLineEl && inputLineEl.contains(target)) {
+    focusInput({ force: true });
+    return;
+  }
+  if (isMobileView()) {
+    blurInput();
+    return;
+  }
   focusInput();
 });
 
 if (jumpButton) {
   jumpButton.addEventListener("click", () => {
     scrollToBottom();
-    focusInput();
+    if (!isMobileView()) {
+      focusInput();
+    }
   });
+}
+
+if (flowEl) {
+  flowEl.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const choiceNode = target.closest(".flow-step__choice");
+    if (!(choiceNode instanceof HTMLElement)) return;
+    const choiceIndex = Number.parseInt(choiceNode.dataset.choiceIndex || "", 10);
+    if (Number.isNaN(choiceIndex)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (mode === "flow") {
+      activateFlowChoice(choiceIndex);
+      return;
+    }
+    activateShellSlashChoice(choiceIndex);
+  });
+}
+
+const handleMobileViewportChange = () => {
+  syncMobileViewport();
+  updatePrompt();
+  updateTitle();
+  updateInputAssist();
+};
+
+if (typeof mobileViewQuery.addEventListener === "function") {
+  mobileViewQuery.addEventListener("change", handleMobileViewportChange);
+} else {
+  mobileViewQuery.addListener(handleMobileViewportChange);
+}
+
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", syncMobileViewport);
+  window.visualViewport.addEventListener("scroll", syncMobileViewport);
 }
 
 window.addEventListener("beforeunload", () => {
@@ -3675,12 +3874,15 @@ window.addEventListener("beforeunload", () => {
 });
 
 loadState();
+syncMobileViewport();
 if (!shellOutputHTML) {
   queueBootSequence();
 }
 updatePrompt();
 scrollToBottom();
-focusInput();
+if (!isMobileView()) {
+  focusInput({ force: true });
+}
 if (inputWrapEl) {
-  inputWrapEl.classList.add("is-focused");
+  inputWrapEl.classList.toggle("is-focused", document.activeElement === inputEl);
 }
