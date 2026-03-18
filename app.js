@@ -63,6 +63,7 @@ let lastMobileComposerHeight = 0;
 let lastMobileKeyboardOpen = false;
 let mobileViewportSyncFrame = 0;
 let pendingMobileViewportReveal = false;
+let preserveMobileKeyboardOnRun = false;
 let sessionStats = {
   startedAt: Date.now(),
   commandsExecuted: 0,
@@ -2249,6 +2250,10 @@ function isMobileView() {
   return mobileViewQuery.matches;
 }
 
+function isMobileInputSoftLocked() {
+  return isRunning && preserveMobileKeyboardOnRun && isMobileView();
+}
+
 function blurInput() {
   if (document.activeElement === inputEl) {
     inputEl.blur();
@@ -2338,13 +2343,18 @@ function scheduleMobileViewportSync(options = {}) {
 }
 
 function submitShellInput(value, options = {}) {
-  const { blurAfter = false } = options;
+  const { blurAfter = false, preserveMobileKeyboard = false } = options;
   const trimmed = String(value || "").trim();
   if (!trimmed || isRunning) return;
+  if (preserveMobileKeyboard && isMobileView()) {
+    focusInput({ force: true });
+  }
+  preserveMobileKeyboardOnRun =
+    preserveMobileKeyboard && isMobileView() && document.activeElement === inputEl;
   shellHistoryIndex = pushHistoryEntry(shellHistory, trimmed);
   setInputValue("");
   runCommand(trimmed);
-  if (blurAfter && isMobileView()) {
+  if (!preserveMobileKeyboardOnRun && blurAfter && isMobileView()) {
     blurInput();
   }
 }
@@ -2392,7 +2402,10 @@ function activateShellSlashChoice(choiceIndex) {
     focusInput({ force: true });
     return true;
   }
-  submitShellInput(displayName, { blurAfter: true });
+  submitShellInput(displayName, {
+    blurAfter: true,
+    preserveMobileKeyboard: true,
+  });
   return true;
 }
 
@@ -2963,8 +2976,9 @@ function updateInputAssist() {
 
 function setRunning(next) {
   isRunning = next;
-  inputEl.disabled = next;
+  inputEl.disabled = next && !isMobileInputSoftLocked();
   if (!next) {
+    preserveMobileKeyboardOnRun = false;
     focusInput();
   }
   updateInputAssist();
@@ -3748,6 +3762,11 @@ document.addEventListener("keydown", (event) => {
 }, true);
 
 inputEl.addEventListener("keydown", (event) => {
+  if (isMobileInputSoftLocked()) {
+    event.preventDefault();
+    return;
+  }
+
   if (handleFlowArrowKey(event)) {
     return;
   }
@@ -3921,6 +3940,16 @@ if (inputLineEl) {
   });
 }
 
+inputEl.addEventListener("beforeinput", (event) => {
+  if (isMobileInputSoftLocked()) {
+    event.preventDefault();
+  }
+});
+inputEl.addEventListener("paste", (event) => {
+  if (isMobileInputSoftLocked()) {
+    event.preventDefault();
+  }
+});
 inputEl.addEventListener("input", () => {
   tabState = { value: "", timestamp: 0 };
   shellSlashSelectedIndex = 0;
