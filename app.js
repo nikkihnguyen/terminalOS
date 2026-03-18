@@ -58,6 +58,8 @@ let pendingOpenTarget = null;
 let tabState = { value: "", timestamp: 0 };
 let isUserAtBottom = true;
 let shellSlashSelectedIndex = 0;
+let lastMobileComposerHeight = 0;
+let lastMobileJumpClearance = 0;
 let sessionStats = {
   startedAt: Date.now(),
   commandsExecuted: 0,
@@ -2256,6 +2258,8 @@ function clearMobileLayoutProperties() {
   rootStyle.removeProperty("--mobile-composer-height");
   rootStyle.removeProperty("--mobile-jump-clearance");
   rootStyle.removeProperty("--mobile-keyboard-offset");
+  lastMobileComposerHeight = 0;
+  lastMobileJumpClearance = 0;
   document.documentElement.classList.remove("is-mobile-keyboard-open");
   terminalEl?.classList.remove("is-mobile-keyboard-open");
 }
@@ -2273,9 +2277,19 @@ function syncMobileLayoutMetrics() {
     jumpButton && jumpButton.classList.contains("is-visible")
       ? Math.round(jumpButton.getBoundingClientRect().height) + 16
       : 0;
+  const layoutChanged =
+    composerHeight !== lastMobileComposerHeight || jumpHeight !== lastMobileJumpClearance;
 
   rootStyle.setProperty("--mobile-composer-height", `${composerHeight}px`);
   rootStyle.setProperty("--mobile-jump-clearance", `${jumpHeight}px`);
+  lastMobileComposerHeight = composerHeight;
+  lastMobileJumpClearance = jumpHeight;
+
+  if (layoutChanged && (document.activeElement === inputEl || isUserAtBottom)) {
+    window.requestAnimationFrame(() => {
+      scrollToBottom();
+    });
+  }
 }
 
 function revealMobileInputContext() {
@@ -2603,10 +2617,10 @@ function getShellSlashPaletteState(rawValue) {
   const selectedValue = selectedEntry ? getCommandDisplayName(selectedEntry) : "";
   const prompt = selectedEntry
     ? isMobileView()
-      ? `Slash commands. ${selectedValue}: ${selectedEntry.description}  ·  Tap a command to run.`
+      ? "Slash commands. Tap to run or keep typing."
       : `Slash commands. ${selectedValue}: ${selectedEntry.description}  ·  Enter runs  ·  Tab completes.`
     : isMobileView()
-      ? "Slash commands. Type to filter or tap a command."
+      ? "Slash commands. Type to filter."
       : "Slash commands. Type to filter custom commands.";
 
   return {
@@ -2641,6 +2655,7 @@ function renderShellSlashMenu(rawValue = inputEl.value) {
     if (mode !== "flow") {
       flowEl.innerHTML = "";
       flowEl.hidden = true;
+      flowEl.classList.remove("terminal__flow--palette");
     }
     syncMobileLayoutMetrics();
     return;
@@ -2657,6 +2672,7 @@ function renderShellSlashMenu(rawValue = inputEl.value) {
     {},
     paletteState.selectedIndex
   );
+  flowEl.classList.add("terminal__flow--palette");
   syncMobileLayoutMetrics();
 }
 
@@ -2921,14 +2937,14 @@ function updateInputAssist() {
 
   if (!shouldShowGhost) {
     ghostEl.textContent = "";
-    ghostEl.style.transform = "translateX(0)";
+    ghostEl.style.setProperty("--ghost-offset-x", "0px");
     renderShellSlashMenu();
     syncMobileLayoutMetrics();
     return;
   }
 
   ghostEl.textContent = suffix;
-  ghostEl.style.transform = `translateX(${getCursorOffset()}px)`;
+  ghostEl.style.setProperty("--ghost-offset-x", `${getCursorOffset()}px`);
   renderShellSlashMenu();
   syncMobileLayoutMetrics();
 }
