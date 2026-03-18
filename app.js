@@ -1,4 +1,4 @@
-import spinnerLibrary from "./node_modules/unicode-animations/dist/index.js";
+import spinnerLibrary from "./spinnerLibrary.js";
 import { rawProjectData } from "./projectData.js";
 
 const outputEl = document.getElementById("output");
