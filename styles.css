@@ -37,12 +37,15 @@
 
 html {
   height: 100%;
+  background: #171a18;
+  color-scheme: dark;
 }
 
 body {
   margin: 0;
   font-family: var(--font-mono);
   font-size: 14px;
+  background-color: #171a18;
   background: linear-gradient(180deg, var(--bg-gradient) 0%, var(--bg) 38%);
   color: var(--text);
   height: 100%;

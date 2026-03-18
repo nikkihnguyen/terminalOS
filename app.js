@@ -15,6 +15,7 @@ const inputWrapEl = document.querySelector(".terminal__input-wrap");
 const ghostEl = document.getElementById("terminal-ghost");
 const helperEl = document.getElementById("terminal-helper");
 const flowEl = document.getElementById("terminal-flow");
+const themeColorMetaEl = document.querySelector('meta[name="theme-color"]');
 const mobileViewQuery = window.matchMedia("(max-width: 720px)");
 
 const STORAGE_KEYS = {
@@ -3504,7 +3505,19 @@ function applyTheme(themeName) {
   if (themeName !== "default") {
     terminalEl.classList.add(`theme-${themeName}`);
   }
+  syncBrowserChrome();
   safeStorageSet(STORAGE_KEYS.theme, themeName);
+}
+
+function syncBrowserChrome() {
+  if (!terminalEl) return;
+  const rootStyle = getComputedStyle(terminalEl);
+  const backgroundColor = rootStyle.getPropertyValue("--bg").trim() || "#171a18";
+  document.documentElement.style.backgroundColor = backgroundColor;
+  document.body.style.backgroundColor = backgroundColor;
+  if (themeColorMetaEl) {
+    themeColorMetaEl.setAttribute("content", backgroundColor);
+  }
 }
 
 function updatePrompt() {
@@ -4026,6 +4039,7 @@ window.addEventListener("beforeunload", () => {
 });
 
 loadState();
+syncBrowserChrome();
 syncMobileViewport();
 if (!shellOutputHTML) {
   queueBootSequence();
