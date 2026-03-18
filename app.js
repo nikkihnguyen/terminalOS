@@ -7,6 +7,7 @@ const promptEl = document.getElementById("prompt");
 const jumpButton = document.getElementById("jump-to-bottom");
 const sizeMeasureEl = document.getElementById("terminal-size-measure");
 const terminalEl = document.getElementById("terminal");
+const composerEl = document.getElementById("terminal-composer");
 const inputLineEl = document.getElementById("input-line");
 const caretEl = document.getElementById("terminal-caret");
 const measureEl = document.getElementById("terminal-measure");
@@ -187,6 +188,9 @@ const featuredBookmarkSlugs = ["terminal-os", "spline", "cursor", "claude"];
 const FLOW_BACK_VALUE = "back";
 const FLOW_EXIT_VALUE = "exit";
 const MOBILE_CLI_BOX_WIDTH = 38;
+const MOBILE_MIN_ART_WIDTH = 24;
+const MOBILE_MIN_OUTPUT_COLS = 28;
+const MOBILE_KEYBOARD_THRESHOLD = 120;
 const SLASH_COMMAND_NAMES = new Set([
   "help",
   "preview",
@@ -1011,18 +1015,49 @@ function getNode(path) {
   return node;
 }
 
+function getTerminalCharWidth() {
+  if (!sizeMeasureEl) return 8;
+  const testWidth = sizeMeasureEl.getBoundingClientRect().width || 80;
+  return testWidth / 10;
+}
+
+function getOutputContentWidth() {
+  if (!outputEl) return 0;
+  const computedStyle = getComputedStyle(outputEl);
+  const horizontalPadding =
+    parseFloat(computedStyle.paddingLeft || "0") +
+    parseFloat(computedStyle.paddingRight || "0");
+  return Math.max(0, outputEl.clientWidth - horizontalPadding);
+}
+
+function getOutputColumnCapacity() {
+  const charWidth = getTerminalCharWidth();
+  const contentWidth = getOutputContentWidth();
+  if (!charWidth || !contentWidth) {
+    return isMobileView() ? MOBILE_CLI_BOX_WIDTH + 4 : CLI_BOX_WIDTH + 4;
+  }
+  const minimumCols = isMobileView() ? MOBILE_MIN_OUTPUT_COLS : 40;
+  return Math.max(minimumCols, Math.floor(contentWidth / charWidth));
+}
+
+function getMobileArtWidth(width = CLI_BOX_WIDTH) {
+  if (!isMobileView()) return width;
+  const availableCols = getOutputColumnCapacity();
+  return Math.max(MOBILE_MIN_ART_WIDTH, Math.min(width, availableCols - 4));
+}
+
 function formatDirectoryListing(entries) {
   const names = Object.keys(entries || {}).sort((a, b) => a.localeCompare(b));
-  return names
-    .map((name) => {
-      const node = entries[name];
-      const safeName = escapeHTML(name);
-      if (node.type === "dir") {
-        return `<span class="dir">${safeName}</span>`;
-      }
-      return `<span class="file">${safeName}</span>`;
-    })
-    .join("  ");
+  const formattedNames = names.map((name) => {
+    const node = entries[name];
+    const safeName = escapeHTML(name);
+    if (node.type === "dir") {
+      return `<span class="dir">${safeName}</span>`;
+    }
+    return `<span class="file">${safeName}</span>`;
+  });
+
+  return isMobileView() ? formattedNames.join("<br>") : formattedNames.join("  ");
 }
 
 function formatPromptPath(path) {
@@ -1053,16 +1088,30 @@ function wrapArtText(text, width) {
     let current = "";
 
     words.forEach((word) => {
+      let remainder = word;
+      while (remainder.length > width) {
+        const segment = remainder.slice(0, width);
+        remainder = remainder.slice(width);
+        if (current) {
+          lines.push(current);
+          current = "";
+        }
+        lines.push(segment);
+      }
+
+      const chunk = remainder || "";
+      if (!chunk) return;
       if (!current) {
-        current = word;
+        current = chunk;
         return;
       }
-      const next = `${current} ${word}`;
+
+      const next = `${current} ${chunk}`;
       if (next.length <= width) {
         current = next;
       } else {
         lines.push(current);
-        current = word;
+        current = chunk;
       }
     });
 
@@ -1116,7 +1165,7 @@ function formatArtRows(rows = [], width = CLI_BOX_WIDTH) {
 }
 
 function createArtBox({ title = "", rows = [], width = CLI_BOX_WIDTH }) {
-  const resolvedWidth = isMobileView() ? Math.min(width, MOBILE_CLI_BOX_WIDTH) : width;
+  const resolvedWidth = isMobileView() ? getMobileArtWidth(Math.min(width, MOBILE_CLI_BOX_WIDTH)) : width;
   const topLabel = title ? ` ${title} ` : "";
   const top =
     topLabel.length && topLabel.length < resolvedWidth
@@ -1187,6 +1236,12 @@ function createWelcomeArt() {
 
 function formatCollectionLine(index, total, slug, label, summary) {
   const branch = index === total - 1 ? "└─" : "├─";
+  if (isMobileView()) {
+    const header = `${branch} ${label} (${slug})`;
+    const wrappedSummary = wrapArtText(summary, Math.max(20, getOutputColumnCapacity() - 4))
+      .map((line) => `   ${line}`);
+    return [header, ...wrappedSummary].join("\n");
+  }
   return `${branch} ${String(slug).padEnd(18)} ${label} — ${summary}`;
 }
 
@@ -1969,6 +2024,7 @@ function updateJumpButton() {
   if (!jumpButton) return;
   const shouldShow = !isUserAtBottom;
   jumpButton.classList.toggle("is-visible", shouldShow);
+  syncMobileLayoutMetrics();
 }
 
 function clearShellOutput() {
@@ -2113,6 +2169,8 @@ function renderFlowStepContent(node, step, answers = {}, selectedIndex = 0) {
       node.appendChild(choiceNode);
     });
   }
+
+  syncMobileLayoutMetrics();
 }
 
 function renderFlowStepNode(step) {
@@ -2163,6 +2221,8 @@ function updateFlowStepNode() {
       labelNode.textContent = choices[index]?.label || "";
     }
   });
+
+  syncMobileLayoutMetrics();
 }
 
 function moveFlowSelection(delta) {
@@ -2190,14 +2250,65 @@ function blurInput() {
   }
 }
 
+function clearMobileLayoutProperties() {
+  const rootStyle = document.documentElement.style;
+  rootStyle.removeProperty("--mobile-viewport-height");
+  rootStyle.removeProperty("--mobile-composer-height");
+  rootStyle.removeProperty("--mobile-jump-clearance");
+  rootStyle.removeProperty("--mobile-keyboard-offset");
+  document.documentElement.classList.remove("is-mobile-keyboard-open");
+  terminalEl?.classList.remove("is-mobile-keyboard-open");
+}
+
+function syncMobileLayoutMetrics() {
+  const rootStyle = document.documentElement.style;
+  if (!isMobileView()) {
+    rootStyle.removeProperty("--mobile-composer-height");
+    rootStyle.removeProperty("--mobile-jump-clearance");
+    return;
+  }
+
+  const composerHeight = composerEl ? Math.round(composerEl.getBoundingClientRect().height) : 0;
+  const jumpHeight =
+    jumpButton && jumpButton.classList.contains("is-visible")
+      ? Math.round(jumpButton.getBoundingClientRect().height) + 16
+      : 0;
+
+  rootStyle.setProperty("--mobile-composer-height", `${composerHeight}px`);
+  rootStyle.setProperty("--mobile-jump-clearance", `${jumpHeight}px`);
+}
+
+function revealMobileInputContext() {
+  if (!isMobileView() || document.activeElement !== inputEl) return;
+  window.requestAnimationFrame(() => {
+    syncMobileLayoutMetrics();
+    scrollToBottom();
+  });
+}
+
 function syncMobileViewport() {
   const rootStyle = document.documentElement.style;
   if (!isMobileView()) {
-    rootStyle.removeProperty("--mobile-app-height");
+    clearMobileLayoutProperties();
     return;
   }
-  const viewportHeight = window.visualViewport?.height || window.innerHeight;
-  rootStyle.setProperty("--mobile-app-height", `${Math.round(viewportHeight)}px`);
+
+  const visualViewport = window.visualViewport;
+  const layoutHeight = window.innerHeight;
+  const viewportHeight = Math.round(visualViewport?.height || layoutHeight);
+  const viewportTop = Math.round(visualViewport?.offsetTop || 0);
+  const obscuredBottom = Math.max(0, Math.round(layoutHeight - viewportHeight - viewportTop));
+  const keyboardOpen = obscuredBottom > MOBILE_KEYBOARD_THRESHOLD;
+
+  rootStyle.setProperty("--mobile-viewport-height", `${viewportHeight}px`);
+  rootStyle.setProperty("--mobile-keyboard-offset", `${keyboardOpen ? obscuredBottom : 0}px`);
+  document.documentElement.classList.toggle("is-mobile-keyboard-open", keyboardOpen);
+  terminalEl?.classList.toggle("is-mobile-keyboard-open", keyboardOpen);
+  syncMobileLayoutMetrics();
+
+  if (document.activeElement === inputEl) {
+    revealMobileInputContext();
+  }
 }
 
 function submitShellInput(value, options = {}) {
@@ -2531,6 +2642,7 @@ function renderShellSlashMenu(rawValue = inputEl.value) {
       flowEl.innerHTML = "";
       flowEl.hidden = true;
     }
+    syncMobileLayoutMetrics();
     return;
   }
 
@@ -2545,6 +2657,7 @@ function renderShellSlashMenu(rawValue = inputEl.value) {
     {},
     paletteState.selectedIndex
   );
+  syncMobileLayoutMetrics();
 }
 
 function getShellSlashCompletionState(rawValue) {
@@ -2810,12 +2923,14 @@ function updateInputAssist() {
     ghostEl.textContent = "";
     ghostEl.style.transform = "translateX(0)";
     renderShellSlashMenu();
+    syncMobileLayoutMetrics();
     return;
   }
 
   ghostEl.textContent = suffix;
   ghostEl.style.transform = `translateX(${getCursorOffset()}px)`;
   renderShellSlashMenu();
+  syncMobileLayoutMetrics();
 }
 
 function setRunning(next) {
@@ -2837,6 +2952,9 @@ function focusInput(options = {}) {
   inputEl.focus({ preventScroll: true });
   updateCaret();
   updateInputAssist();
+  if (isMobileView()) {
+    revealMobileInputContext();
+  }
 }
 
 function clearPendingTimers() {
@@ -3377,12 +3495,11 @@ function updatePrompt() {
 
 function updateTitle() {
   if (!sizeMeasureEl) return;
-  const testWidth = sizeMeasureEl.getBoundingClientRect().width || 1;
-  const charWidth = testWidth / 10;
+  const charWidth = getTerminalCharWidth();
   const lineHeight =
     parseFloat(getComputedStyle(outputEl).lineHeight) ||
     parseFloat(getComputedStyle(outputEl).fontSize) * 1.55;
-  const cols = Math.max(40, Math.floor(outputEl.clientWidth / charWidth));
+  const cols = Math.max(isMobileView() ? MOBILE_MIN_OUTPUT_COLS : 40, Math.floor(outputEl.clientWidth / charWidth));
   const rows = Math.max(10, Math.floor(outputEl.clientHeight / lineHeight));
   document.title = `Terminal — zsh — ${cols}x${rows}`;
 }
@@ -3778,12 +3895,14 @@ inputEl.addEventListener("focus", () => {
   }
   updateCaret();
   updateInputAssist();
+  revealMobileInputContext();
 });
 inputEl.addEventListener("blur", () => {
   if (inputWrapEl) {
     inputWrapEl.classList.remove("is-focused");
   }
   updateInputAssist();
+  syncMobileLayoutMetrics();
 });
 window.addEventListener("resize", () => {
   syncMobileViewport();
@@ -3798,11 +3917,9 @@ outputEl.addEventListener("scroll", () => {
 });
 
 outputEl.addEventListener("click", () => {
-  if (isMobileView()) {
-    blurInput();
-    return;
+  if (!isMobileView()) {
+    focusInput();
   }
-  focusInput();
 });
 
 terminalEl.addEventListener("click", (event) => {
@@ -3816,7 +3933,6 @@ terminalEl.addEventListener("click", (event) => {
     return;
   }
   if (isMobileView()) {
-    blurInput();
     return;
   }
   focusInput();
@@ -3854,6 +3970,9 @@ const handleMobileViewportChange = () => {
   updatePrompt();
   updateTitle();
   updateInputAssist();
+  if (document.activeElement === inputEl) {
+    revealMobileInputContext();
+  }
 };
 
 if (typeof mobileViewQuery.addEventListener === "function") {
@@ -3863,8 +3982,8 @@ if (typeof mobileViewQuery.addEventListener === "function") {
 }
 
 if (window.visualViewport) {
-  window.visualViewport.addEventListener("resize", syncMobileViewport);
-  window.visualViewport.addEventListener("scroll", syncMobileViewport);
+  window.visualViewport.addEventListener("resize", handleMobileViewportChange);
+  window.visualViewport.addEventListener("scroll", handleMobileViewportChange);
 }
 
 window.addEventListener("beforeunload", () => {

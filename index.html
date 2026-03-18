@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://ipapi.co https://ipwho.is https://api.ipify.org; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
@@ -14,25 +14,27 @@
   <body>
     <main class="terminal" id="terminal">
       <div class="terminal__output" id="output" aria-live="polite"></div>
-      <div class="terminal__flow" id="terminal-flow" aria-live="polite" hidden></div>
-      <div class="terminal__input-line" id="input-line">
-        <span class="terminal__prompt" id="prompt">guest@terminal ~ %</span>
-        <div class="terminal__input-wrap">
-          <span class="terminal__ghost" id="terminal-ghost" aria-hidden="true"></span>
-          <input
-            class="terminal__input"
-            id="command-input"
-            type="text"
-            autocomplete="off"
-            autocapitalize="off"
-            spellcheck="false"
-            aria-label="Terminal input"
-          />
-          <span class="terminal__caret" id="terminal-caret" aria-hidden="true"></span>
-          <span class="terminal__measure" id="terminal-measure" aria-hidden="true"></span>
+      <div class="terminal__composer" id="terminal-composer">
+        <div class="terminal__flow" id="terminal-flow" aria-live="polite" hidden></div>
+        <div class="terminal__input-line" id="input-line">
+          <span class="terminal__prompt" id="prompt">guest@terminal ~ %</span>
+          <div class="terminal__input-wrap">
+            <span class="terminal__ghost" id="terminal-ghost" aria-hidden="true"></span>
+            <input
+              class="terminal__input"
+              id="command-input"
+              type="text"
+              autocomplete="off"
+              autocapitalize="off"
+              spellcheck="false"
+              aria-label="Terminal input"
+            />
+            <span class="terminal__caret" id="terminal-caret" aria-hidden="true"></span>
+            <span class="terminal__measure" id="terminal-measure" aria-hidden="true"></span>
+          </div>
         </div>
+        <div class="terminal__helper" id="terminal-helper" aria-live="polite"></div>
       </div>
-      <div class="terminal__helper" id="terminal-helper" aria-live="polite"></div>
       <button class="terminal__jump" id="jump-to-bottom" type="button">Jump to bottom</button>
       <span class="terminal__size-measure" id="terminal-size-measure" aria-hidden="true">MMMMMMMMMM</span>
     </main>
