@@ -3661,6 +3661,46 @@ function handleFlowArrowKey(event) {
   return false;
 }
 
+function submitActiveInput() {
+  if (isRunning) return;
+
+  let value = inputEl.value;
+  if (mode === "flow" && !inputEl.value.trim()) {
+    value = getSelectedFlowChoiceValue();
+  } else if (mode === "shell") {
+    const paletteState = getShellSlashPaletteState(inputEl.value);
+    if (paletteState.active && paletteState.selectedValue) {
+      value = paletteState.selectedValue;
+    }
+  }
+
+  if (mode === "shell") {
+    if (value.trim()) {
+      submitShellInput(value);
+    } else {
+      setInputValue("");
+      appendCommandEcho("");
+      saveOutput();
+      scrollToBottom();
+    }
+    return;
+  }
+
+  if (mode === "flow") {
+    submitFlowInput(value);
+    return;
+  }
+
+  if (mode === "ai") {
+    if (value.trim()) {
+      aiHistoryIndex = pushHistoryEntry(aiHistory, value.trim());
+    }
+    setInputValue("");
+    appendCommandEcho(value);
+    handleAIInput(value);
+  }
+}
+
 document.addEventListener("keydown", (event) => {
   if (handleFlowArrowKey(event)) {
     return;
@@ -3737,43 +3777,8 @@ inputEl.addEventListener("keydown", (event) => {
 
   if (event.key === "Enter") {
     event.preventDefault();
-    if (isRunning) return;
-    let value = inputEl.value;
-    if (mode === "flow" && !inputEl.value.trim()) {
-      value = getSelectedFlowChoiceValue();
-    } else if (mode === "shell") {
-      const paletteState = getShellSlashPaletteState(inputEl.value);
-      if (paletteState.active && paletteState.selectedValue) {
-        value = paletteState.selectedValue;
-      }
-    }
-
-    if (mode === "shell") {
-      if (value.trim()) {
-        submitShellInput(value);
-      } else {
-        setInputValue("");
-        appendCommandEcho("");
-        saveOutput();
-        scrollToBottom();
-      }
-      return;
-    }
-
-    if (mode === "flow") {
-      submitFlowInput(value);
-      return;
-    }
-
-    if (mode === "ai") {
-      if (value.trim()) {
-        aiHistoryIndex = pushHistoryEntry(aiHistory, value.trim());
-      }
-      setInputValue("");
-      appendCommandEcho(value);
-      handleAIInput(value);
-      return;
-    }
+    submitActiveInput();
+    return;
   }
 
   if (event.key === "ArrowUp") {
@@ -3868,6 +3873,13 @@ inputEl.addEventListener("keydown", (event) => {
     }
   }
 });
+
+if (inputLineEl) {
+  inputLineEl.addEventListener("submit", (event) => {
+    event.preventDefault();
+    submitActiveInput();
+  });
+}
 
 inputEl.addEventListener("input", () => {
   tabState = { value: "", timestamp: 0 };

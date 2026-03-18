@@ -16,7 +16,7 @@
       <div class="terminal__output" id="output" aria-live="polite"></div>
       <div class="terminal__composer" id="terminal-composer">
         <div class="terminal__flow" id="terminal-flow" aria-live="polite" hidden></div>
-        <div class="terminal__input-line" id="input-line">
+        <form class="terminal__input-line" id="input-line" novalidate>
           <span class="terminal__prompt" id="prompt">guest@terminal ~ %</span>
           <div class="terminal__input-wrap">
             <span class="terminal__ghost" id="terminal-ghost" aria-hidden="true"></span>
@@ -26,13 +26,15 @@
               type="text"
               autocomplete="off"
               autocapitalize="off"
+              autocorrect="off"
               spellcheck="false"
+              enterkeyhint="go"
               aria-label="Terminal input"
             />
             <span class="terminal__caret" id="terminal-caret" aria-hidden="true"></span>
             <span class="terminal__measure" id="terminal-measure" aria-hidden="true"></span>
           </div>
-        </div>
+        </form>
         <div class="terminal__helper" id="terminal-helper" aria-live="polite"></div>
       </div>
       <button class="terminal__jump" id="jump-to-bottom" type="button">Jump to bottom</button>

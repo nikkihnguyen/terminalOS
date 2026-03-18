@@ -31,6 +31,7 @@
   --mobile-composer-height: 0px;
   --mobile-jump-clearance: 0px;
   --mobile-keyboard-offset: 0px;
+  --mobile-safe-top: env(safe-area-inset-top, 0px);
   --mobile-safe-bottom: env(safe-area-inset-bottom, 0px);
   --font-mono: "Geist Mono", "SF Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   --font-display: "Geist Mono", "SF Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
@@ -488,6 +489,8 @@ pre {
   .terminal {
     height: var(--mobile-viewport-height, 100dvh);
     min-height: var(--mobile-viewport-height, 100dvh);
+    padding-top: var(--mobile-safe-top);
+    box-sizing: border-box;
   }
 
   .terminal__composer {
