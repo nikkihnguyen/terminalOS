@@ -59,7 +59,9 @@ let tabState = { value: "", timestamp: 0 };
 let isUserAtBottom = true;
 let shellSlashSelectedIndex = 0;
 let lastMobileComposerHeight = 0;
-let lastMobileJumpClearance = 0;
+let lastMobileKeyboardOpen = false;
+let mobileViewportSyncFrame = 0;
+let pendingMobileViewportReveal = false;
 let sessionStats = {
   startedAt: Date.now(),
   commandsExecuted: 0,
@@ -2254,12 +2256,15 @@ function blurInput() {
 
 function clearMobileLayoutProperties() {
   const rootStyle = document.documentElement.style;
-  rootStyle.removeProperty("--mobile-viewport-height");
   rootStyle.removeProperty("--mobile-composer-height");
-  rootStyle.removeProperty("--mobile-jump-clearance");
   rootStyle.removeProperty("--mobile-keyboard-offset");
   lastMobileComposerHeight = 0;
-  lastMobileJumpClearance = 0;
+  lastMobileKeyboardOpen = false;
+  pendingMobileViewportReveal = false;
+  if (mobileViewportSyncFrame) {
+    window.cancelAnimationFrame(mobileViewportSyncFrame);
+    mobileViewportSyncFrame = 0;
+  }
   document.documentElement.classList.remove("is-mobile-keyboard-open");
   terminalEl?.classList.remove("is-mobile-keyboard-open");
 }
@@ -2268,39 +2273,27 @@ function syncMobileLayoutMetrics() {
   const rootStyle = document.documentElement.style;
   if (!isMobileView()) {
     rootStyle.removeProperty("--mobile-composer-height");
-    rootStyle.removeProperty("--mobile-jump-clearance");
     return;
   }
 
   const composerHeight = composerEl ? Math.round(composerEl.getBoundingClientRect().height) : 0;
-  const jumpHeight =
-    jumpButton && jumpButton.classList.contains("is-visible")
-      ? Math.round(jumpButton.getBoundingClientRect().height) + 16
-      : 0;
-  const layoutChanged =
-    composerHeight !== lastMobileComposerHeight || jumpHeight !== lastMobileJumpClearance;
-
   rootStyle.setProperty("--mobile-composer-height", `${composerHeight}px`);
-  rootStyle.setProperty("--mobile-jump-clearance", `${jumpHeight}px`);
   lastMobileComposerHeight = composerHeight;
-  lastMobileJumpClearance = jumpHeight;
-
-  if (layoutChanged && (document.activeElement === inputEl || isUserAtBottom)) {
-    window.requestAnimationFrame(() => {
-      scrollToBottom();
-    });
-  }
 }
 
-function revealMobileInputContext() {
+function revealMobileInputContext(options = {}) {
+  const { force = false } = options;
   if (!isMobileView() || document.activeElement !== inputEl) return;
   window.requestAnimationFrame(() => {
     syncMobileLayoutMetrics();
-    scrollToBottom();
+    if (force || isUserAtBottom) {
+      scrollToBottom();
+    }
   });
 }
 
-function syncMobileViewport() {
+function syncMobileViewport(options = {}) {
+  const { revealOnKeyboardToggle = false } = options;
   const rootStyle = document.documentElement.style;
   if (!isMobileView()) {
     clearMobileLayoutProperties();
@@ -2312,17 +2305,35 @@ function syncMobileViewport() {
   const viewportHeight = Math.round(visualViewport?.height || layoutHeight);
   const viewportTop = Math.round(visualViewport?.offsetTop || 0);
   const obscuredBottom = Math.max(0, Math.round(layoutHeight - viewportHeight - viewportTop));
-  const keyboardOpen = obscuredBottom > MOBILE_KEYBOARD_THRESHOLD;
+  const keyboardOffset = obscuredBottom > MOBILE_KEYBOARD_THRESHOLD ? obscuredBottom : 0;
+  const keyboardOpen = keyboardOffset > 0;
+  const keyboardStateChanged = keyboardOpen !== lastMobileKeyboardOpen;
 
-  rootStyle.setProperty("--mobile-viewport-height", `${viewportHeight}px`);
-  rootStyle.setProperty("--mobile-keyboard-offset", `${keyboardOpen ? obscuredBottom : 0}px`);
+  rootStyle.setProperty("--mobile-keyboard-offset", `${keyboardOffset}px`);
   document.documentElement.classList.toggle("is-mobile-keyboard-open", keyboardOpen);
   terminalEl?.classList.toggle("is-mobile-keyboard-open", keyboardOpen);
+  lastMobileKeyboardOpen = keyboardOpen;
   syncMobileLayoutMetrics();
 
-  if (document.activeElement === inputEl) {
-    revealMobileInputContext();
+  if (revealOnKeyboardToggle && keyboardStateChanged && document.activeElement === inputEl) {
+    revealMobileInputContext({ force: true });
   }
+}
+
+function scheduleMobileViewportSync(options = {}) {
+  const { revealOnKeyboardToggle = false } = options;
+  pendingMobileViewportReveal = pendingMobileViewportReveal || revealOnKeyboardToggle;
+  if (mobileViewportSyncFrame) return;
+
+  mobileViewportSyncFrame = window.requestAnimationFrame(() => {
+    const shouldReveal = pendingMobileViewportReveal;
+    pendingMobileViewportReveal = false;
+    mobileViewportSyncFrame = 0;
+    syncMobileViewport({ revealOnKeyboardToggle: shouldReveal });
+    updatePrompt();
+    updateTitle();
+    updateInputAssist();
+  });
 }
 
 function submitShellInput(value, options = {}) {
@@ -3923,7 +3934,7 @@ inputEl.addEventListener("focus", () => {
   }
   updateCaret();
   updateInputAssist();
-  revealMobileInputContext();
+  revealMobileInputContext({ force: true });
 });
 inputEl.addEventListener("blur", () => {
   if (inputWrapEl) {
@@ -3933,7 +3944,7 @@ inputEl.addEventListener("blur", () => {
   syncMobileLayoutMetrics();
 });
 window.addEventListener("resize", () => {
-  syncMobileViewport();
+  scheduleMobileViewportSync({ revealOnKeyboardToggle: true });
   updateCaret();
   updateTitle();
   updateInputAssist();
@@ -3994,13 +4005,7 @@ if (flowEl) {
 }
 
 const handleMobileViewportChange = () => {
-  syncMobileViewport();
-  updatePrompt();
-  updateTitle();
-  updateInputAssist();
-  if (document.activeElement === inputEl) {
-    revealMobileInputContext();
-  }
+  scheduleMobileViewportSync({ revealOnKeyboardToggle: true });
 };
 
 if (typeof mobileViewQuery.addEventListener === "function") {

@@ -27,9 +27,7 @@
   --hero-fill: rgba(184, 247, 177, 0.06);
   --code-bg: rgba(255, 255, 255, 0.1);
   --jump-bg: rgba(20, 20, 20, 0.9);
-  --mobile-viewport-height: 100dvh;
   --mobile-composer-height: 0px;
-  --mobile-jump-clearance: 0px;
   --mobile-keyboard-offset: 0px;
   --mobile-safe-top: env(safe-area-inset-top, 0px);
   --mobile-safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -504,35 +502,31 @@ pre {
 
 @media (max-width: 720px) {
   body {
-    height: var(--mobile-viewport-height, 100dvh);
-    min-height: var(--mobile-viewport-height, 100dvh);
+    height: 100svh;
+    min-height: 100svh;
   }
 
   .terminal {
-    height: var(--mobile-viewport-height, 100dvh);
-    min-height: var(--mobile-viewport-height, 100dvh);
+    height: 100%;
+    min-height: 0;
     padding-top: var(--mobile-safe-top);
     box-sizing: border-box;
   }
 
   .terminal__composer {
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    position: relative;
+    flex: 0 0 auto;
+    margin-top: auto;
     z-index: 3;
     padding: 6px 0 calc(6px + var(--mobile-safe-bottom));
     background:
       linear-gradient(180deg, rgba(23, 26, 24, 0) 0%, rgba(23, 26, 24, 0.86) 18%, rgba(23, 26, 24, 0.96) 42%, var(--bg) 100%);
-    pointer-events: none;
+    transition: margin-bottom 180ms ease, padding-bottom 180ms ease;
   }
 
   .terminal.is-mobile-keyboard-open .terminal__composer {
     padding-bottom: 4px;
-  }
-
-  .terminal__composer > * {
-    pointer-events: auto;
+    margin-bottom: max(0px, calc(var(--mobile-keyboard-offset, 0px) - var(--mobile-safe-bottom)));
   }
 
   .terminal__input-wrap {
@@ -544,8 +538,8 @@ pre {
     padding: 12px 12px 0;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior-y: contain;
-    padding-bottom: calc(16px + var(--mobile-composer-height, 0px) + var(--mobile-jump-clearance, 0px));
-    scroll-padding-bottom: calc(16px + var(--mobile-composer-height, 0px) + var(--mobile-jump-clearance, 0px));
+    padding-bottom: 16px;
+    scroll-padding-bottom: 16px;
   }
 
   .terminal__flow {
@@ -714,7 +708,11 @@ pre {
   }
 
   .terminal.is-mobile-keyboard-open .terminal__jump {
-    bottom: calc(12px + var(--mobile-composer-height, 0px));
+    bottom: calc(
+      12px +
+      var(--mobile-composer-height, 0px) +
+      max(0px, calc(var(--mobile-keyboard-offset, 0px) - var(--mobile-safe-bottom)))
+    );
   }
 }
 
